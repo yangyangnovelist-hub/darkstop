@@ -80,6 +80,7 @@ contract MockFtsoV2 {
 contract DarkStopVaultTest is Test {
     event OrderPlaced(uint256 indexed orderId, address indexed owner);
     event OrderExecuted(uint256 indexed orderId, uint256 price);
+    event OrderCancelled(uint256 indexed orderId);
 
     uint256 internal constant INSTRUCTION_FEE = 0.01 ether;
 
@@ -320,5 +321,71 @@ contract DarkStopVaultTest is Test {
         vm.prank(executor);
         vm.expectRevert(bytes("order not open"));
         vault.settle(42, 25_000, 300);
+    }
+
+    // ---------------------------------------------------------------
+    // cancel
+    // ---------------------------------------------------------------
+
+    function test_Cancel_OnlyOrderOwner() public {
+        uint256 id = _placeAliceOrder();
+
+        vm.prank(bob);
+        vm.expectRevert(bytes("not order owner"));
+        vault.cancel(id);
+    }
+
+    function test_Cancel_RefundsDepositAndSendsInstruction() public {
+        uint256 id = _placeAliceOrder();
+        uint256 balanceBefore = alice.balance;
+
+        vm.prank(alice);
+        vm.expectEmit(true, true, true, true, address(vault));
+        emit OrderCancelled(id);
+        vault.cancel(id);
+
+        assertEq(alice.balance, balanceBefore + 5 ether); // full deposit back
+        assertEq(address(vault).balance, 0);
+        (,, uint8 status) = vault.orders(id);
+        assertEq(status, 3); // cancelled
+
+        // CANCEL_ORDER instruction sent (2nd instruction after PLACE_ORDER).
+        assertEq(extensionRegistry.sendCount(), 2);
+        assertEq(extensionRegistry.lastOpType(), bytes32("DARKSTOP"));
+        assertEq(extensionRegistry.lastOpCommand(), bytes32("CANCEL_ORDER"));
+        assertEq(extensionRegistry.lastMessage(), abi.encode(id));
+    }
+
+    function test_Cancel_ThenSettleReverts() public {
+        uint256 id = _placeAliceOrder();
+
+        vm.prank(alice);
+        vault.cancel(id);
+
+        vm.prank(executor);
+        vm.expectRevert(bytes("order not open"));
+        vault.settle(id, 25_000, 300);
+    }
+
+    function test_Cancel_AfterExecutedReverts() public {
+        uint256 id = _placeAliceOrder();
+
+        vm.prank(executor);
+        vault.settle(id, 25_000, 300);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("order not open"));
+        vault.cancel(id);
+    }
+
+    function test_Cancel_TwiceReverts() public {
+        uint256 id = _placeAliceOrder();
+
+        vm.prank(alice);
+        vault.cancel(id);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("order not open"));
+        vault.cancel(id);
     }
 }
