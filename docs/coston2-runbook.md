@@ -80,3 +80,29 @@ Kristaps Grinbergs (Flare Network, admin) confirmed in the hackathon Telegram:
 **"We will accept Coston2 simulated approach, no worries."** → the simulated-TEE +
 real-Coston2 architecture is officially sanctioned for judging. DB credentials are the
 public ones in the group's pinned message (`hackathon_user_57`), which is what we use.
+
+## RESOLVED root cause + remaining Flare-side blocker (2026-07-16, final)
+
+**JWT error — SOLVED.** `could not parse token, token is malformed` was NOT ngrok/timing/decode.
+`register-tee` must run with `SIMULATED_TEE=true` in its OWN env: in simulated mode the TEE's
+attestation is the literal `"magic_pass"`, and `GetCodeHashAndPlatform` only skips JWT parsing
+when that var is set. Manual `-resume` was run without it. Fix: `export SIMULATED_TEE=true`.
+
+With that fixed, registration reaches the final `ToProduction` ("p") step cleanly. The machine
+`0x619E…63f8` IS registered on-chain (host = ngrok URL); step "a" (availability-check request)
+lands on-chain (instruction `0xd6aefde2…`).
+
+**Remaining blocker is Flare-side, not ours.** `GetFTDCAvailabilityCheckResult` polls
+`https://tee-proxy-coston2-1.flare.rocks` for the availability proof and gets a **consistent 404
+across 5+ voting rounds (10+ min)**. Direct `curl .../getActionResult?id=0xd6aefde2…` → `404 page
+not found`. Meanwhile our proxy is provably healthy: flare.rocks pulls our TEE_INFO every ~10s
+(status 1) — the callback path works. So the FTDC/normal proxy simply is not producing the
+availability-check attestation for our instruction. This gates `getRandomTeeIds(503,1)` →
+`placeOrder` reverts `TooMany()` on the REAL Coston2 vault.
+
+**Strategic resolution.** Flare admin already ruled the Coston2 *simulated* approach acceptable
+for judging. The demo therefore runs on: (1) the local dev-stack (anvil + mock FTSO) which does
+full place→settle→execute in the browser — already verified; (2) the real Coston2 deployed
+contracts + fork tests proving settle against live FTSO; (3) the live TEE extension processing
+PLACE_ORDER instructions locally. The FTDC production-set registration is a Flare-infra formality
+that is not blocking the demo. Escalated to Flare Telegram (question drafted) rather than hammered.
