@@ -33,3 +33,6 @@ DEPLOYMENT.md
 config/**/*.log.env
 config/darkstop-deploy.json
 config/deploy.log
+
+# forge script broadcast logs (local dev stack)
+broadcast/
