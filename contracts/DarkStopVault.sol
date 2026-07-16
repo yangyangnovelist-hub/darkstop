@@ -94,6 +94,9 @@ contract DarkStopVault {
     /// (USD per FLR, scaled to PAYOUT_DECIMALS).
     event OrderExecuted(uint256 indexed orderId, uint256 price);
 
+    /// @notice Emitted when an order is cancelled by its owner.
+    event OrderCancelled(uint256 indexed orderId);
+
     /// @notice Initializes the contract with registry addresses.
     /// @param _teeExtensionRegistry Address of the TEE extension registry.
     /// @param _teeMachineRegistry Address of the TEE machine registry.
@@ -192,6 +195,27 @@ contract DarkStopVault {
         // USD/FLR, so the product / 1e18 is a PAYOUT_DECIMALS USD amount.
         uint256 payout = order.deposit * price / 1e18;
         require(PAYOUT_TOKEN.transfer(order.owner, payout), "payout transfer failed");
+    }
+
+    /// @notice Cancels an open order: refunds the full deposit to the order
+    /// owner and notifies the TEE to drop the order from enclave state.
+    /// @dev Payable so a caller can attach the registry's instruction fee for
+    /// the CANCEL_ORDER message; any attached value is forwarded, the refund
+    /// itself is untouched.
+    /// @param _orderId The order to cancel.
+    function cancel(uint256 _orderId) external payable {
+        Order storage order = orders[_orderId];
+        require(order.owner == msg.sender, "not order owner");
+        require(order.status == STATUS_OPEN, "order not open");
+
+        order.status = STATUS_CANCELLED;
+        uint256 deposit = order.deposit;
+        emit OrderCancelled(_orderId);
+
+        _sendInstruction(OP_COMMAND_CANCEL, abi.encode(_orderId), msg.value);
+
+        (bool ok,) = msg.sender.call{value: deposit}("");
+        require(ok, "refund failed");
     }
 
     /// @notice Rescales an FTSO feed value (int8 decimals) to PAYOUT_DECIMALS.
