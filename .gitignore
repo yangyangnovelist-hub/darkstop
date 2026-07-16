@@ -36,3 +36,8 @@ config/deploy.log
 
 # forge script broadcast logs (local dev stack)
 broadcast/
+
+# TEE registration state + debug artifacts
+config/register-tee.state
+scratchpad_proof.json
+out/
