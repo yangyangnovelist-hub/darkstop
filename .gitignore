@@ -32,3 +32,4 @@ DEPLOYMENT.md
 
 config/**/*.log.env
 config/darkstop-deploy.json
+config/deploy.log
