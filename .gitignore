@@ -20,7 +20,7 @@ tools/register-*
 tools/run-*
 
 # Generated contract bindings (produced by scripts/generate-bindings.sh)
-tools/pkg/contracts/*/autogen.go
+tools/pkg/contracts/*/autogen*.go
 tools/pkg/contracts/*/*.abi
 tools/pkg/contracts/*/*.bin
 
