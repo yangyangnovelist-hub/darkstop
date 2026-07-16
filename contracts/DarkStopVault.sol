@@ -82,10 +82,17 @@ contract DarkStopVault {
     /// @notice Id of the most recently placed order (0 = none yet).
     uint256 public nextOrderId;
 
+    /// @notice TEE settlement submitter, set by the owner after TEE registration.
+    address public teeExecutor;
+
     uint256 private _extensionId;
 
     /// @notice Emitted when an order is placed. Carries NO price data.
     event OrderPlaced(uint256 indexed orderId, address indexed owner);
+
+    /// @notice Emitted when an order is executed at the FTSO-verified price
+    /// (USD per FLR, scaled to PAYOUT_DECIMALS).
+    event OrderExecuted(uint256 indexed orderId, uint256 price);
 
     /// @notice Initializes the contract with registry addresses.
     /// @param _teeExtensionRegistry Address of the TEE extension registry.
@@ -149,6 +156,51 @@ contract DarkStopVault {
         emit OrderPlaced(id, msg.sender);
 
         _sendInstruction(OP_COMMAND_PLACE, abi.encode(id, _ciphertext), INSTRUCTION_FEE);
+    }
+
+    /// @notice Sets the TEE settlement submitter. Contract owner only.
+    /// @param _teeExecutor Address allowed to call settle().
+    function setTeeExecutor(address _teeExecutor) external {
+        require(msg.sender == OWNER, "not contract owner");
+        teeExecutor = _teeExecutor;
+    }
+
+    /// @notice Settles an order whose (TEE-revealed) trigger has been hit.
+    /// @dev Only callable by the TEE executor. The contract does NOT trust the
+    /// TEE alone: it re-reads the live FTSO FLR/USD feed and requires the
+    /// current price to be fresh and at-or-below the revealed trigger.
+    /// The deposit stays in the vault (testnet stand-in for the stable-side
+    /// swap); the owner is paid `deposit * price` in USDT0.
+    /// @param _orderId The order to settle.
+    /// @param _triggerPrice Revealed trigger (USD per FLR, PAYOUT_DECIMALS scale).
+    /// @param _maxAgeSec Maximum accepted FTSO price age in seconds.
+    function settle(uint256 _orderId, uint256 _triggerPrice, uint256 _maxAgeSec) external {
+        require(msg.sender == teeExecutor, "not tee executor");
+        Order storage order = orders[_orderId];
+        require(order.status == STATUS_OPEN, "order not open");
+
+        (uint256 value, int8 decimals, uint64 timestamp) = FTSO_V2.getFeedById(FLR_USD);
+        require(block.timestamp - timestamp <= _maxAgeSec, "stale price");
+
+        uint256 price = _toPayoutDecimals(value, decimals);
+        require(price <= _triggerPrice, "price above trigger");
+
+        order.status = STATUS_EXECUTED;
+        emit OrderExecuted(_orderId, price);
+
+        // deposit is 18-decimals native token; price is PAYOUT_DECIMALS
+        // USD/FLR, so the product / 1e18 is a PAYOUT_DECIMALS USD amount.
+        uint256 payout = order.deposit * price / 1e18;
+        require(PAYOUT_TOKEN.transfer(order.owner, payout), "payout transfer failed");
+    }
+
+    /// @notice Rescales an FTSO feed value (int8 decimals) to PAYOUT_DECIMALS.
+    function _toPayoutDecimals(uint256 _value, int8 _decimals) internal pure returns (uint256) {
+        int256 shift = int256(uint256(PAYOUT_DECIMALS)) - int256(_decimals);
+        if (shift >= 0) {
+            return _value * 10 ** uint256(shift);
+        }
+        return _value / 10 ** uint256(-shift);
     }
 
     /// @notice Sends an instruction to a random TEE machine of this extension.
