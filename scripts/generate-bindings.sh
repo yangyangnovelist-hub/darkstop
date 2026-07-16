@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # generate-bindings.sh — Compile Solidity contracts and generate Go bindings.
 #
+# Generates bindings for:
+#   - DarkStopVault (contracts/DarkStopVault.sol) — vault + instruction sender
+#   - MockUSDT0     (contracts/MockUSDT0.sol)     — testnet payout token
+#
 # Prerequisites: forge (Foundry), jq
 #
 # Usage: ./scripts/generate-bindings.sh
@@ -9,8 +13,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# --- Contract name and Go package ---
-CONTRACT_NAME="DarkStopInstructionSender"
 GO_PKG="darkstop"
 BINDINGS_DIR="$PROJECT_DIR/tools/pkg/contracts/$GO_PKG"
 
@@ -19,36 +21,41 @@ cd "$PROJECT_DIR"
 echo "=== Step 1: Compile Solidity contracts ==="
 forge build
 
-# Verify the contract name in the source matches what we expect
-if ! grep -q "contract ${CONTRACT_NAME}" "$PROJECT_DIR/contracts/InstructionSender.sol" 2>/dev/null; then
-    echo ""
-    echo "ERROR: Contract name '${CONTRACT_NAME}' not found in contracts/InstructionSender.sol."
-    echo "Make sure the contract name in InstructionSender.sol matches CONTRACT_NAME in this script."
-    exit 1
-fi
+# extract_contract <ContractName> <SourceFile.sol>
+extract_contract() {
+    local name="$1" src="$2"
+
+    if ! grep -q "contract ${name}" "$PROJECT_DIR/contracts/${src}" 2>/dev/null; then
+        echo ""
+        echo "ERROR: Contract name '${name}' not found in contracts/${src}."
+        echo "Make sure the contract name matches this script."
+        exit 1
+    fi
+
+    local forge_out="$PROJECT_DIR/out/${src}/${name}.json"
+    if [[ ! -f "$forge_out" ]]; then
+        echo "ERROR: forge output not found at $forge_out"
+        exit 1
+    fi
+
+    jq '.abi' "$forge_out" > "$BINDINGS_DIR/${name}.abi"
+    jq -r '.bytecode.object' "$forge_out" | sed 's/^0x//' > "$BINDINGS_DIR/${name}.bin"
+
+    echo "  ABI → $BINDINGS_DIR/${name}.abi"
+    echo "  BIN → $BINDINGS_DIR/${name}.bin"
+}
 
 echo "=== Step 2: Extract ABI and BIN ==="
-FORGE_OUT="$PROJECT_DIR/out/InstructionSender.sol/${CONTRACT_NAME}.json"
-if [[ ! -f "$FORGE_OUT" ]]; then
-    echo "ERROR: forge output not found at $FORGE_OUT"
-    echo "Check that CONTRACT_NAME matches your Solidity contract name."
-    exit 1
-fi
-
 mkdir -p "$BINDINGS_DIR"
+extract_contract "DarkStopVault" "DarkStopVault.sol"
+extract_contract "MockUSDT0" "MockUSDT0.sol"
 
-# Extract ABI (JSON array)
-jq '.abi' "$FORGE_OUT" > "$BINDINGS_DIR/${CONTRACT_NAME}.abi"
-
-# Extract bytecode (hex string, strip 0x prefix)
-jq -r '.bytecode.object' "$FORGE_OUT" | sed 's/^0x//' > "$BINDINGS_DIR/${CONTRACT_NAME}.bin"
-
-echo "  ABI → $BINDINGS_DIR/${CONTRACT_NAME}.abi"
-echo "  BIN → $BINDINGS_DIR/${CONTRACT_NAME}.bin"
+# Drop stale bindings from the pre-vault contract, if present.
+rm -f "$BINDINGS_DIR/DarkStopInstructionSender.abi" "$BINDINGS_DIR/DarkStopInstructionSender.bin"
 
 echo "=== Step 3: Generate Go bindings ==="
 cd "$PROJECT_DIR/tools"
 go generate ./pkg/contracts/$GO_PKG/
 
 echo "=== Done ==="
-echo "Generated: $BINDINGS_DIR/autogen.go"
+echo "Generated: $BINDINGS_DIR/autogen.go, $BINDINGS_DIR/autogen_usdt0.go"
