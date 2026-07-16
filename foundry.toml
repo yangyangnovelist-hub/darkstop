@@ -3,6 +3,9 @@ src = "contracts"
 out = "out"
 libs = ["lib"]
 # TODO: Once flare-smart-contracts-v2 is published as a package, add it as a dependency
-# and restore the remapping:
-#   remappings = ["flare-smart-contracts-v2=lib/flare-smart-contracts-v2"]
+# and add the remapping "flare-smart-contracts-v2=lib/flare-smart-contracts-v2".
+remappings = [
+    "flare-periphery/=lib/flare-foundry-periphery-package/src/",
+    "forge-std/=lib/forge-std/src/",
+]
 via-ir = true
