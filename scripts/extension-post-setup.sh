@@ -55,7 +55,7 @@ log "INSTRUCTION_SENDER: ${INSTRUCTION_SENDER:-<not set>}"
 log "CHAIN_URL:          ${CHAIN_URL:-<not set>}"
 
 # --- Add your extension-specific post-registration setup below ---
-# The Hello World scaffold has no post-registration setup. Replace this with
+# The DarkStop scaffold has no post-registration setup yet. Replace this with
 # your own logic if your extension needs the TEE address on-chain.
 
-log "No extension-specific post-setup needed (Hello World scaffold)."
+log "No extension-specific post-setup needed (DarkStop scaffold)."
