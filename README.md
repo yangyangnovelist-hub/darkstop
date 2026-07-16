@@ -33,7 +33,7 @@ flowchart LR
         G[settle&#40;&#41;<br/>FTSO re-check on-chain]
         H[FtsoV2<br/>FLR/USD feed]
     end
-    subgraph TEE extension [TEE extension &#40;Go&#41;]
+    subgraph TEE[TEE extension &#40;Go&#41;]
         D[PLACE_ORDER handler<br/>decrypt + validate]
         E[In-enclave order store]
         F[FTSO watcher<br/>poll price, detect trigger]
