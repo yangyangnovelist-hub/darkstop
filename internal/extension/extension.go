@@ -45,12 +45,9 @@ func (e *Extension) stateHandler(w http.ResponseWriter, r *http.Request) {
 	e.mu.RLock()
 	stateResponse := types.StateResponse{
 		StateVersion: teeutils.ToHash(config.Version),
-		State: types.State{
-			GreetingCount: e.greetingCount,
-			LastGreeting:  e.lastGreeting,
-			FarewellCount: e.farewellCount,
-			LastFarewell:  e.lastFarewell,
-		},
+		// Placeholder until the DARKSTOP handler swap (Task 3.3) wires the
+		// encryption pubkey and order store into state.
+		State: types.State{},
 	}
 	e.mu.RUnlock()
 

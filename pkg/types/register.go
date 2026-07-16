@@ -2,27 +2,32 @@ package types
 
 import "extension-scaffold/pkg/decoder"
 
+// funcDecoder adapts a typed decode function to the decoder.Decoder interface.
+type funcDecoder[T any] func([]byte) (T, error)
+
+func (f funcDecoder[T]) Decode(data []byte) (any, error) { return f(data) }
+
 // RegisterDecoders registers all type decoders for this extension.
 // Extension developers: add new registrations here for each OPType/OPCommand.
 func RegisterDecoders(r *decoder.Registry) {
-	// SAY_HELLO message (JSON)
+	// PLACE_ORDER message: abi.encode(uint256 orderId, bytes ciphertext)
 	r.Register(
-		decoder.RegistryKey{OPType: "GREETING", OPCommand: "SAY_HELLO", Kind: decoder.KindMessage},
-		decoder.NewJSONDecoder[SayHelloRequest](),
+		decoder.RegistryKey{OPType: "DARKSTOP", OPCommand: "PLACE_ORDER", Kind: decoder.KindMessage},
+		funcDecoder[PlaceOrderRequest](DecodePlaceOrder),
 	)
-	// SAY_HELLO result (JSON)
+	// PLACE_ORDER result (JSON)
 	r.Register(
-		decoder.RegistryKey{OPType: "GREETING", OPCommand: "SAY_HELLO", Kind: decoder.KindResult},
-		decoder.NewJSONDecoder[SayHelloResponse](),
+		decoder.RegistryKey{OPType: "DARKSTOP", OPCommand: "PLACE_ORDER", Kind: decoder.KindResult},
+		decoder.NewJSONDecoder[OrderResponse](),
 	)
-	// SAY_GOODBYE message (ABI-encoded)
+	// CANCEL_ORDER message: abi.encode(uint256 orderId)
 	r.Register(
-		decoder.RegistryKey{OPType: "GREETING", OPCommand: "SAY_GOODBYE", Kind: decoder.KindMessage},
-		decoder.NewABIDecoder[SayGoodbyeRequest](SayGoodbyeMessageArg),
+		decoder.RegistryKey{OPType: "DARKSTOP", OPCommand: "CANCEL_ORDER", Kind: decoder.KindMessage},
+		funcDecoder[CancelOrderRequest](DecodeCancelOrder),
 	)
-	// SAY_GOODBYE result (JSON)
+	// CANCEL_ORDER result (JSON)
 	r.Register(
-		decoder.RegistryKey{OPType: "GREETING", OPCommand: "SAY_GOODBYE", Kind: decoder.KindResult},
-		decoder.NewJSONDecoder[SayGoodbyeResponse](),
+		decoder.RegistryKey{OPType: "DARKSTOP", OPCommand: "CANCEL_ORDER", Kind: decoder.KindResult},
+		decoder.NewJSONDecoder[OrderResponse](),
 	)
 }
