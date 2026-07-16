@@ -79,6 +79,7 @@ contract MockFtsoV2 {
 
 contract DarkStopVaultTest is Test {
     event OrderPlaced(uint256 indexed orderId, address indexed owner);
+    event OrderExecuted(uint256 indexed orderId, uint256 price);
 
     uint256 internal constant INSTRUCTION_FEE = 0.01 ether;
 
@@ -109,6 +110,10 @@ contract DarkStopVaultTest is Test {
         );
         extensionRegistry.setRegisteredSender(address(vault));
         vault.setExtensionId();
+        vault.setTeeExecutor(executor);
+
+        // Deterministic base time for staleness checks.
+        vm.warp(1_000_000);
 
         // Pre-fund the vault's payout pool with 1,000,000 USDT0 (6 decimals).
         usdt0.mint(address(vault), 1_000_000e6);
@@ -206,5 +211,114 @@ contract DarkStopVaultTest is Test {
         vm.prank(alice);
         vm.expectRevert(bytes("empty ciphertext"));
         vault.placeOrder{value: INSTRUCTION_FEE + 1 ether}("");
+    }
+
+    // ---------------------------------------------------------------
+    // setTeeExecutor
+    // ---------------------------------------------------------------
+
+    function test_SetTeeExecutor_OnlyOwner() public {
+        vm.prank(bob);
+        vm.expectRevert(bytes("not contract owner"));
+        vault.setTeeExecutor(bob);
+
+        // Contract owner (this test contract deployed the vault) may set it.
+        vault.setTeeExecutor(address(0x1234));
+        assertEq(vault.teeExecutor(), address(0x1234));
+    }
+
+    // ---------------------------------------------------------------
+    // settle
+    //
+    // Price conventions: triggerPrice is USD per FLR scaled to the payout
+    // token's 6 decimals. The FTSO feed value comes with its own int8
+    // decimals and is normalized to 6 decimals before comparison/payout.
+    // ---------------------------------------------------------------
+
+    /// @dev Places a 5-ether-deposit order for alice and sets a fresh FTSO
+    /// price of 0.02 USD/FLR published with feed decimals 7 (value 200000).
+    function _placeAliceOrder() internal returns (uint256 id) {
+        vm.prank(alice);
+        id = vault.placeOrder{value: INSTRUCTION_FEE + 5 ether}(ciphertext);
+        ftso.setFeed(200_000, 7, uint64(block.timestamp));
+    }
+
+    function test_Settle_OnlyTeeExecutor() public {
+        uint256 id = _placeAliceOrder();
+
+        vm.prank(bob);
+        vm.expectRevert(bytes("not tee executor"));
+        vault.settle(id, 25_000, 300);
+
+        vm.prank(alice); // even the order owner cannot settle
+        vm.expectRevert(bytes("not tee executor"));
+        vault.settle(id, 25_000, 300);
+    }
+
+    function test_Settle_RevertsOnStalePrice() public {
+        uint256 id = _placeAliceOrder();
+        vm.warp(block.timestamp + 301); // feed timestamp now 301s old, max 300
+
+        vm.prank(executor);
+        vm.expectRevert(bytes("stale price"));
+        vault.settle(id, 25_000, 300);
+    }
+
+    function test_Settle_RevertsIfPriceAboveTrigger() public {
+        uint256 id = _placeAliceOrder(); // current price 0.02 = 20_000 (6 dec)
+
+        vm.prank(executor);
+        vm.expectRevert(bytes("price above trigger"));
+        vault.settle(id, 19_999, 300); // trigger just below current price
+    }
+
+    function test_Settle_PaysOutAndFlipsStatus() public {
+        uint256 id = _placeAliceOrder();
+
+        // deposit 5e18 wei * price 20_000 (0.02 USD, 6 dec) / 1e18
+        // = 100_000 = 0.1 USDT0
+        vm.prank(executor);
+        vm.expectEmit(true, true, true, true, address(vault));
+        emit OrderExecuted(id, 20_000);
+        vault.settle(id, 25_000, 300);
+
+        assertEq(usdt0.balanceOf(alice), 100_000);
+        (, uint256 deposit, uint8 status) = vault.orders(id);
+        assertEq(status, 2); // executed
+        assertEq(deposit, 5 ether); // deposit stays in the vault
+        assertEq(address(vault).balance, 5 ether);
+    }
+
+    function test_Settle_NormalizesLowDecimalFeeds() public {
+        vm.prank(alice);
+        uint256 id = vault.placeOrder{value: INSTRUCTION_FEE + 5 ether}(ciphertext);
+
+        // Same 0.02 USD price but published with 5 feed decimals, and exactly
+        // maxAgeSec old (boundary: still fresh).
+        ftso.setFeed(2_000, 5, uint64(block.timestamp));
+        vm.warp(block.timestamp + 300);
+
+        vm.prank(executor);
+        vault.settle(id, 20_000, 300); // trigger == price: at-or-below triggers
+
+        assertEq(usdt0.balanceOf(alice), 100_000);
+    }
+
+    function test_Settle_TwiceReverts() public {
+        uint256 id = _placeAliceOrder();
+
+        vm.prank(executor);
+        vault.settle(id, 25_000, 300);
+
+        vm.prank(executor);
+        vm.expectRevert(bytes("order not open"));
+        vault.settle(id, 25_000, 300);
+    }
+
+    function test_Settle_RevertsOnUnknownOrder() public {
+        ftso.setFeed(200_000, 7, uint64(block.timestamp));
+        vm.prank(executor);
+        vm.expectRevert(bytes("order not open"));
+        vault.settle(42, 25_000, 300);
     }
 }
