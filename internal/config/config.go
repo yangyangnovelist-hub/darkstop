@@ -17,6 +17,9 @@ const (
 	OPCommandCancelOrder = "CANCEL_ORDER"
 
 	TimeoutShutdown = 5 * time.Second
+
+	// WatcherInterval is how often the FTSO watcher polls the FLR/USD feed.
+	WatcherInterval = 5 * time.Second
 )
 
 // Defaults.
@@ -24,6 +27,12 @@ var (
 	ExtensionPort  = 8080
 	SignPort       = 9090
 	TypesServerPort = 8100
+
+	// Watcher wiring (no defaults — the watcher only starts when all
+	// three are set).
+	ChainURL           = ""
+	VaultAddress       = ""
+	ExecutorPrivateKey = ""
 )
 
 // Environment variables override defaults.
@@ -31,6 +40,10 @@ func init() {
 	ep := os.Getenv("EXTENSION_PORT")
 	sp := os.Getenv("SIGN_PORT")
 	tp := os.Getenv("TYPES_SERVER_PORT")
+
+	ChainURL = os.Getenv("CHAIN_URL")
+	VaultAddress = os.Getenv("VAULT_ADDRESS")
+	ExecutorPrivateKey = os.Getenv("EXECUTOR_PRIVATE_KEY")
 
 	if ep != "" {
 		if v, err := strconv.Atoi(ep); err == nil {

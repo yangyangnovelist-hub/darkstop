@@ -17,19 +17,33 @@ import (
 func main() {
 	e := extension.New(config.ExtensionPort, config.SignPort)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// FTSO watcher: settles triggered orders. Only runs when CHAIN_URL,
+	// VAULT_ADDRESS and EXECUTOR_PRIVATE_KEY are configured.
+	started, err := extension.LaunchWatcherFromConfig(ctx, e.Store())
+	if err != nil {
+		logger.Fatalf("starting watcher: %v", err)
+	}
+	if !started {
+		logger.Warn("watcher disabled: set CHAIN_URL, VAULT_ADDRESS and EXECUTOR_PRIVATE_KEY to enable settlement")
+	}
+
 	// Graceful shutdown.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		ctx, cancel := context.WithTimeout(context.Background(), config.TimeoutShutdown)
-		defer cancel()
-		_ = e.Server.Shutdown(ctx)
+		cancel()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), config.TimeoutShutdown)
+		defer shutdownCancel()
+		_ = e.Server.Shutdown(shutdownCtx)
 		os.Exit(0)
 	}()
 
 	logger.Infof("starting extension server on :%d", config.ExtensionPort)
-	err := e.Server.ListenAndServe()
+	err = e.Server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		logger.Fatalf("server: %v", err)
 	}

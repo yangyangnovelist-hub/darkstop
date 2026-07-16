@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	teeServer "github.com/flare-foundation/tee-node/pkg/server"
 
 	"extension-scaffold/internal/config"
+	extension "extension-scaffold/internal/extension"
 	extserver "extension-scaffold/pkg/server"
 )
 
@@ -30,7 +32,7 @@ func main() {
 	go teeServer.StartServerExtension(configPort, signPort, extensionPort)
 
 	// Start extension server — fail fast if port binding fails.
-	extErrCh := extserver.StartExtension(extensionPort, signPort)
+	ext, extErrCh := extserver.StartExtension(extensionPort, signPort)
 
 	// Give server a moment to bind, then check for early failures.
 	time.Sleep(100 * time.Millisecond)
@@ -40,7 +42,20 @@ func main() {
 	default:
 	}
 
-	logger.Infof("extension TEE running (config=%d, sign=%d, ext=%d)", configPort, signPort, extensionPort)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// FTSO watcher: settles triggered orders. Only runs when CHAIN_URL,
+	// VAULT_ADDRESS and EXECUTOR_PRIVATE_KEY are configured.
+	started, err := extension.LaunchWatcherFromConfig(ctx, ext.Store())
+	if err != nil {
+		logger.Fatalf("starting watcher: %v", err)
+	}
+	if !started {
+		logger.Warn("watcher disabled: set CHAIN_URL, VAULT_ADDRESS and EXECUTOR_PRIVATE_KEY to enable settlement")
+	}
+
+	logger.Infof("extension TEE running (config=%d, sign=%d, ext=%d, watcher=%t)", configPort, signPort, extensionPort, started)
 
 	// Wait for signal or server error.
 	sigChan := make(chan os.Signal, 1)

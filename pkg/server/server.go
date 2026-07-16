@@ -2,9 +2,11 @@ package server
 
 import extension "extension-scaffold/internal/extension"
 
-// StartExtension creates and starts the template extension server in a goroutine.
-// Returns an error channel that receives any ListenAndServe failure (e.g., port already in use).
-func StartExtension(extensionPort, signPort int) <-chan error {
+// StartExtension creates and starts the extension server in a goroutine.
+// Returns the extension instance (so callers can wire the FTSO watcher to
+// its order store) and an error channel that receives any ListenAndServe
+// failure (e.g., port already in use).
+func StartExtension(extensionPort, signPort int) (*extension.Extension, <-chan error) {
 	e := extension.New(extensionPort, signPort)
 	errCh := make(chan error, 1)
 	go func() {
@@ -12,5 +14,5 @@ func StartExtension(extensionPort, signPort int) <-chan error {
 			errCh <- err
 		}
 	}()
-	return errCh
+	return e, errCh
 }

@@ -413,6 +413,45 @@ func TestProcessCancelOrder(t *testing.T) {
 	}
 }
 
+// --- POST /action over real HTTP ---
+
+func TestActionHandler_PlaceOrderOverHTTP(t *testing.T) {
+	e := newTestExtension(t)
+	server := httptest.NewServer(e.Server.Handler)
+	defer server.Close()
+
+	action := buildTestAction(
+		toHash(config.OPTypeDarkstop),
+		toHash(config.OPCommandPlaceOrder),
+		packPlace(t, big.NewInt(1), encryptTrigger(t, e, "20000")),
+	)
+	body, _ := json.Marshal(action)
+
+	httpResp, err := http.Post(server.URL+"/action", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("POST /action: %v", err)
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", httpResp.StatusCode)
+	}
+
+	var result teetypes.ActionResult
+	if err := json.NewDecoder(httpResp.Body).Decode(&result); err != nil {
+		t.Fatalf("decoding ActionResult: %v", err)
+	}
+	if result.Status != 1 {
+		t.Fatalf("expected success, got status %d (log: %s)", result.Status, result.Log)
+	}
+	var resp types.OrderResponse
+	if err := json.Unmarshal(result.Data, &resp); err != nil {
+		t.Fatalf("decoding OrderResponse: %v", err)
+	}
+	if resp.OrderID != "1" || resp.Status != StatusOpen {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
 // --- GET /state ---
 
 func TestStateHandler(t *testing.T) {
