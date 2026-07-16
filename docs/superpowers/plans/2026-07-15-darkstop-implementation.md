@@ -144,7 +144,8 @@ type State struct { EncryptionPubKey string `json:"encryptionPubKey"`; OpenOrder
 
 ## Phase 5 — Frontend (`frontend/`, Next.js single page)
 
-- [ ] `npx create-next-app@latest frontend --ts --tailwind --app --no-src-dir`; deps: `viem`, `wagmi`, `@tanstack/react-query`, `eciesjs`
+- [ ] `npx create-next-app@latest frontend --ts --tailwind --app --no-src-dir`; deps: `viem`, `wagmi`, `@tanstack/react-query`, `@noble/curves`
+- [ ] **eciesjs is NOT wire-compatible with go-ethereum ECIES (verified in Phase 3)** — write a ~40-line custom encryptor (@noble/curves secp256k1 + WebCrypto AES-128-CTR + HMAC-SHA-256, NIST concat-KDF): output `0x04‖ephemeralPubXY(64)‖IV(16)‖ct‖HMAC tag(32)`, z = shared X (32B), K = concatKDF(SHA-256, z, nil, 32), Ke=K[:16], Km=SHA-256(K[16:32]), tag=HMAC(Km, IV‖ct). Conformance target: `internal/extension/testdata/ecies_vector.json` — add a vitest that reproduces the fixture ciphertext structure and round-trips against a Go decrypt helper if available.
 - [ ] One page: connect wallet (Coston2 chain config) → fetch `GET <ngrok>/state`-proxied pubkey (via a `/api/tee-state` route to dodge CORS) → form (amount C2FLR, trigger USD) → encrypt `{triggerPrice}` with eciesjs → `placeOrder(ciphertext)` with value → live order table from `OrderPlaced`/`OrderExecuted` events (viem `watchContractEvent`), status chips Pending/Executed/Cancelled
 - [ ] Explicit copy on page: "Your trigger price never touches the chain — inspect the tx yourself" + link to the calldata in explorer (the pitch, in-product)
 - [ ] Manual E2E per superpowers verification: place a real order from the browser on Coston2, watch it execute; commit
