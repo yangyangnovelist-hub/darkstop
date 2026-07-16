@@ -10,9 +10,11 @@ import (
 const (
 	Version = "0.1.0"
 
-	OPTypeGreeting     = "GREETING"
-	OPCommandSayHello  = "SAY_HELLO"
-	OPCommandSayGoodbye = "SAY_GOODBYE"
+	// Operation constants — must match the DarkStopVault.sol bytes32
+	// constants byte-for-byte (compared via teeutils.ToHash).
+	OPTypeDarkstop       = "DARKSTOP"
+	OPCommandPlaceOrder  = "PLACE_ORDER"
+	OPCommandCancelOrder = "CANCEL_ORDER"
 
 	TimeoutShutdown = 5 * time.Second
 )

@@ -7,10 +7,13 @@ import (
 	"sync"
 )
 
-// Order statuses as exposed in results and state.
+// Order statuses as exposed in results and state. Cancelled orders are
+// dropped from the store; StatusCancelled only ever appears in the
+// CANCEL_ORDER action result.
 const (
-	StatusOpen     = "open"
-	StatusExecuted = "executed"
+	StatusOpen      = "open"
+	StatusExecuted  = "executed"
+	StatusCancelled = "cancelled"
 )
 
 // Order is a confidential stop-loss order held ONLY in enclave memory.
