@@ -73,3 +73,10 @@ response body that's then parsed as a token — mitigate with the `ngrok-skip-br
 header or a paid/static domain; (b) a genuine decode mismatch in the scaffold's FTDC proof
 handling vs the live Coston2 proxy. Once "p" completes, `nextOrderId`/`placeOrder` unblocks
 (the `TooMany()` revert is gone) and `./scripts/test.sh` runs the full PLACE_ORDER round-trip.
+
+## Judge ruling (2026-07-16, Flare Telegram)
+
+Kristaps Grinbergs (Flare Network, admin) confirmed in the hackathon Telegram:
+**"We will accept Coston2 simulated approach, no worries."** → the simulated-TEE +
+real-Coston2 architecture is officially sanctioned for judging. DB credentials are the
+public ones in the group's pinned message (`hackathon_user_57`), which is what we use.
