@@ -10,8 +10,10 @@ import (
 
 	"extension-scaffold/tools/pkg/contracts/darkstop"
 	"extension-scaffold/tools/pkg/support"
+	instrutils "extension-scaffold/tools/pkg/utils"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // --- 2.4: CheckTx Revert Reason Chain ---
@@ -26,10 +28,17 @@ func TestCheckTx_SuccessfulTx(t *testing.T) {
 		t.Fatalf("transactor: %v", err)
 	}
 
-	_, tx, _, err := darkstop.DeployDarkStopInstructionSender(
+	ftsoV2, err := instrutils.ResolveFtsoV2(testSupport)
+	if err != nil {
+		t.Fatalf("failed to resolve FtsoV2: %v", err)
+	}
+	payoutToken := crypto.PubkeyToAddress(testSupport.Prv.PublicKey) // placeholder, non-zero
+
+	_, tx, _, err := darkstop.DeployDarkStopVault(
 		opts, testSupport.ChainClient,
 		testSupport.Addresses.FlareTeeManager,
 		testSupport.Addresses.FlareTeeManager,
+		ftsoV2, payoutToken, instrutils.DefaultInstructionFee,
 	)
 	if err != nil {
 		t.Fatalf("deploy failed: %v", err)

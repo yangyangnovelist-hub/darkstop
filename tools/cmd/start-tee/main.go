@@ -71,7 +71,9 @@ func runExtension() {
 	go teeServer.StartServerExtension(ExtConfigurationPort, ExtensionServerPort, ExtensionPort)
 
 	// Start extension server — fail fast if port binding fails.
-	extErrCh := echoserver.StartExtension(ExtensionPort, ExtensionServerPort)
+	// (The FTSO watcher is wired in cmd/main.go; this local-dev runner only
+	// exercises the instruction round-trip, not settlement.)
+	_, extErrCh := echoserver.StartExtension(ExtensionPort, ExtensionServerPort)
 
 	// Give server a moment to bind, then check for early failures.
 	time.Sleep(100 * time.Millisecond)

@@ -32,6 +32,7 @@ import (
 	"extension-scaffold/tools/pkg/contracts/darkstop"
 	"extension-scaffold/tools/pkg/fccutils"
 	"extension-scaffold/tools/pkg/support"
+	instrutils "extension-scaffold/tools/pkg/utils"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -88,10 +89,12 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// deployFreshInstructionSender deploys a new InstructionSender contract using
-// the registry addresses from testSupport. Returns the deployed address and
-// bound contract instance.
-func deployFreshInstructionSender(t *testing.T) (common.Address, *darkstop.DarkStopInstructionSender) {
+// deployFreshInstructionSender deploys a new DarkStopVault contract using
+// the registry addresses from testSupport. The FTSO address is resolved from
+// the on-chain FlareContractRegistry; the payout token is a placeholder
+// non-zero EOA (these tests exercise registration, not settlement).
+// Returns the deployed address and bound contract instance.
+func deployFreshInstructionSender(t *testing.T) (common.Address, *darkstop.DarkStopVault) {
 	t.Helper()
 	time.Sleep(rpcDelay)
 
@@ -100,13 +103,20 @@ func deployFreshInstructionSender(t *testing.T) (common.Address, *darkstop.DarkS
 		t.Fatalf("failed to create transactor: %v", err)
 	}
 
-	address, tx, contract, err := darkstop.DeployDarkStopInstructionSender(
+	ftsoV2, err := instrutils.ResolveFtsoV2(testSupport)
+	if err != nil {
+		t.Fatalf("failed to resolve FtsoV2: %v", err)
+	}
+	payoutToken := crypto.PubkeyToAddress(testSupport.Prv.PublicKey) // placeholder, non-zero
+
+	address, tx, contract, err := darkstop.DeployDarkStopVault(
 		opts, testSupport.ChainClient,
 		testSupport.Addresses.FlareTeeManager,
 		testSupport.Addresses.FlareTeeManager,
+		ftsoV2, payoutToken, instrutils.DefaultInstructionFee,
 	)
 	if err != nil {
-		t.Fatalf("failed to deploy InstructionSender: %v", err)
+		t.Fatalf("failed to deploy DarkStopVault: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -135,9 +145,13 @@ func deployInstructionSenderRaw(t *testing.T, registryAddr, machineRegistryAddr 
 		t.Fatalf("failed to create transactor: %v", err)
 	}
 
-	_, _, _, err = darkstop.DeployDarkStopInstructionSender(
+	// Non-zero placeholders for the non-registry args: the constructor only
+	// requires them to be non-zero (no code checks).
+	placeholder := crypto.PubkeyToAddress(testSupport.Prv.PublicKey)
+	_, _, _, err = darkstop.DeployDarkStopVault(
 		opts, testSupport.ChainClient,
 		registryAddr, machineRegistryAddr,
+		placeholder, placeholder, instrutils.DefaultInstructionFee,
 	)
 	return err
 }

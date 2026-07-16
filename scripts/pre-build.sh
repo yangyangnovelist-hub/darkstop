@@ -88,11 +88,12 @@ fi
 step 1 "Generate Go bindings"
 "$SCRIPT_DIR/generate-bindings.sh" || die "Binding generation failed"
 
-# --- Step 2: Deploy InstructionSender ---
-step 2 "Deploy InstructionSender contract"
+# --- Step 2: Deploy DarkStop stack (MockUSDT0 + vault + pool + executor) ---
+step 2 "Deploy DarkStop contracts"
 cd "$PROJECT_DIR/tools"
 : > "$LOG_FILE"  # truncate log file
-INSTRUCTION_SENDER=$(go run ./cmd/deploy-contract -a "$ADDRESSES_FILE" -c "$CHAIN_URL" 2>"$LOG_FILE" | tail -1) || {
+DEPLOY_INFO="$PROJECT_DIR/config/darkstop-deploy.json"
+INSTRUCTION_SENDER=$(go run ./cmd/deploy-contract -a "$ADDRESSES_FILE" -c "$CHAIN_URL" -deployInfo "$DEPLOY_INFO" 2>"$LOG_FILE" | tail -1) || {
     echo -e "${RED}Deploy failed. Logs:${NC}" >&2
     cat "$LOG_FILE" >&2
     die "Deploy failed — see output above"
@@ -105,7 +106,8 @@ INSTRUCTION_SENDER=$(go run ./cmd/deploy-contract -a "$ADDRESSES_FILE" -c "$CHAI
     die "deploy-contract returned invalid address: '$INSTRUCTION_SENDER' (expected 0x + 40 hex chars)"
 }
 
-log "InstructionSender deployed at: $INSTRUCTION_SENDER"
+log "DarkStopVault (instruction sender) deployed at: $INSTRUCTION_SENDER"
+[[ -f "$DEPLOY_INFO" ]] && log "Deployment info: $(cat "$DEPLOY_INFO" | tr -d '\n')"
 
 # --- Step 3: Register extension ---
 step 3 "Register extension on-chain"

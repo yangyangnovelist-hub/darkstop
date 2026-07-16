@@ -31,3 +31,4 @@ notes/
 DEPLOYMENT.md
 
 config/**/*.log.env
+config/darkstop-deploy.json
