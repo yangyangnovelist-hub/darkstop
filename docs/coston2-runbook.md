@@ -106,3 +106,14 @@ full place→settle→execute in the browser — already verified; (2) the real 
 contracts + fork tests proving settle against live FTSO; (3) the live TEE extension processing
 PLACE_ORDER instructions locally. The FTDC production-set registration is a Flare-infra formality
 that is not blocking the demo. Escalated to Flare Telegram (question drafted) rather than hammered.
+
+## CONFIRMED by Flare (2026-07-16, Kristaps in Telegram)
+
+Direct quote: "We are updating FCC for the Coston2 test network and need to rework the
+guides. That is why it is failing atm. Stay tuned for updates. FCC is still in development
+and could change before the final release on Flare mainnet." (t.me/c/2376654368/1245)
+
+→ Our diagnosis is officially confirmed: the FTDC availability-proof 404 is Flare rebuilding
+FCC on Coston2, NOT our code. Action: stop attempting TEE-machine registration until Flare
+ships the update; our extension + proxy are correct and were validated end-to-end up to the
+Flare-controlled step. Cite this quote in the README as evidence the on-chain gap is external.
