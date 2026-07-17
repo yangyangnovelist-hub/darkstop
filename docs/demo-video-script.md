@@ -8,22 +8,25 @@ recording; it never appears in the video.
 
 Total target length: ~3:00. Practice each scene once before recording.
 
+> **注意**: 本流程走 MetaMask-free 路线 —— 下单由命令行脚本 `frontend/scripts/place-order.ts`
+> 完成（它用和浏览器完全相同的加密库把触发价加密后 placeOrder），撤单/结算用
+> `scripts/demo-settle.sh`。全程零钱包配置，已在本机端到端验证通过。
+
 ## Preparation (before recording — 录制前准备, 不计入视频)
 
 操作说明（中文）:
 
 1. 终端进入仓库根目录：`cd ~/Desktop/hackathons/darkstop`
-2. 提前跑一遍本地栈确认一切正常，然后停掉重来，保证录制时是干净状态：
-   `./scripts/dev-stack.sh stop`（如有残留）
-3. 浏览器准备 4 个标签页（先都打开好，录制时只切换）：
-   - Tab 1: `http://localhost:3000`（先别加载，dev server 起来后再刷新）
-   - Tab 2: 本地 explorer 不存在——改用 MetaMask 的交易详情 + 终端里
-     `cast tx <hash>` 展示 calldata（见 Scene 2）
-   - Tab 3: `https://coston2-explorer.flare.network/address/0xd93E8F7dE2A5A7C4eC45F115f7047103da2dD8bF`
-   - Tab 4: GitHub 仓库页（提交后的公开 repo）
-4. 编辑器打开 `contracts/DarkStopVault.sol`，光标停在 `settle()`（约第 180 行），
+2. 干净启动本地栈（会打印合约地址，前端 env 自动写好）：
+   `./scripts/dev-stack.sh stop 2>/dev/null; ./scripts/dev-stack.sh`
+3. 另开一个终端标签起前端：`cd frontend && npm run dev`，等出现 `Ready`，
+   浏览器打开 `http://localhost:3000` 确认页面正常（订单区显示 "No orders yet"）。
+4. 浏览器准备 3 个标签页（先都打开好，录制时只切换）：
+   - Tab 1: `http://localhost:3000`（DarkStop UI）
+   - Tab 2: `https://coston2-explorer.flare.network/address/0xd93E8F7dE2A5A7C4eC45F115f7047103da2dD8bF`（真网合约）
+   - Tab 3: GitHub 仓库页 `https://github.com/yangyangnovelist-hub/darkstop`
+5. 编辑器打开 `contracts/DarkStopVault.sol`，光标停在 `settle()`（约第 180 行），
    字号调大到 16pt 以上
-5. MetaMask 已导入 anvil key #0，网络已添加 `http://127.0.0.1:8545` chain id 31337
 6. 隐藏无关的书签栏、通知，屏幕分辨率见附录
 
 ---
@@ -40,9 +43,9 @@ Total target length: ~3:00. Practice each scene once before recording.
 
 | | |
 |---|---|
-| **Screen** | Terminal: run `./scripts/dev-stack.sh` (output scrolls: anvil starts, vault deployed). Then browser Tab 1 (`localhost:3000`): connect wallet, fill deposit `1` FLR, trigger `0.02` USD, click Place Order, approve in MetaMask. Then back in the terminal: `cast tx <tx-hash> --rpc-url http://127.0.0.1:8545` — **zoom/enlarge on the `input` field**: a long opaque hex blob. Point the cursor at it and hold for 3 seconds. |
-| **Captions** | 1. `Start the stack: one script.` 2. `Place a stop-loss. Trigger price: $0.02.` 3. `The trigger is ECIES-encrypted in the browser.` 4. `On-chain calldata: unreadable ciphertext. No price anywhere.` |
-| **操作说明** | ① 终端输入 `./scripts/dev-stack.sh` 回车，等它跑完（约 20 秒，输出会打印 VAULT/FTSO 地址，**复制保存这两个地址**，Scene 3 要用）。② 新开终端标签 `cd frontend && npm run dev`，等 ready。③ 切浏览器 Tab 1 刷新，点 Connect Wallet → MetaMask 确认。④ 表单填 deposit `1`、trigger `0.02`，点 Place Order，MetaMask 弹窗点确认。⑤ UI 出现 Pending 订单行后，**复制交易 hash**（MetaMask 活动记录里能看到）。⑥ 切回终端敲 `cast tx <粘贴hash> --rpc-url http://127.0.0.1:8545`，滚动到 `input` 字段，用 macOS 的 ctrl+滚轮 或录屏后期放大该区域，停留 3 秒。 |
+| **Screen** | Terminal: run the place-order script — output shows the trigger being ECIES-encrypted into a 137-byte ciphertext and the `placeOrder` tx hash. Switch to browser Tab 1: order **#1 appears as Pending**, live from vault events. Back in terminal: `cast tx <placeOrder-hash> --rpc-url http://127.0.0.1:8545` — **enlarge the `input` field**: a long opaque hex blob. Hold the cursor on it 3 seconds. |
+| **Captions** | 1. `Place a stop-loss. Trigger price: $0.02.` 2. `The trigger is ECIES-encrypted in the browser's crypto lib.` 3. `Order appears live from on-chain events.` 4. `On-chain calldata: unreadable ciphertext. No price anywhere.` |
+| **操作说明** | ① 终端敲 `cd frontend && npx tsx scripts/place-order.ts` 回车。输出会依次打印：`Encrypted trigger $0.02 → 0x04…（137 bytes）`、`placeOrder tx: 0x…`、`mined … status success`。**复制那个 placeOrder tx hash**。② 切浏览器 Tab 1，订单区出现一行 `#1 … Pending`（无需刷新，事件自动推）。停 3 秒。③ 切回终端敲 `cast tx <粘贴hash> --rpc-url http://127.0.0.1:8545`，滚到 `input:` 那一长串 hex，后期放大该区域或用触控板放大，停留 3 秒——重点是"这串就是加密后的触发价，链上没有任何明文价格"。 |
 
 ## Scene 3 — Price crosses, order auto-executes (1:10–1:50)
 
@@ -50,7 +53,7 @@ Total target length: ~3:00. Practice each scene once before recording.
 |---|---|
 | **Screen** | Split view or quick switch: terminal + browser Tab 1 side by side if possible. Terminal: run the two `cast send` commands (price drop, then settle). Browser: the order row flips **Pending → Executed** within ~2 seconds. Hold on the flipped row. |
 | **Captions** | 1. `FLR/USD drops below the trigger.` 2. `The TEE reveals the trigger and settles on-chain.` 3. `Pending → Executed. Payout in USDT0. No human touched it.` |
-| **操作说明** | 用 Scene 2 保存的两个地址替换 `$FTSO` 和 `$VAULT`。① 模拟价格跌破触发价：`cast send $FTSO 'setFeed(uint256,int8,uint64)' 150000 7 $(date +%s) --rpc-url http://127.0.0.1:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80` ② 模拟 TEE 结算：`cast send $VAULT 'settle(uint256,uint256,uint256)' 1 20000 300 --rpc-url http://127.0.0.1:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80` ③ 立刻切到浏览器（最好提前把浏览器和终端左右分屏），等约 2 秒，订单行从 Pending 翻成 Executed，镜头停 4 秒。注意：这两条命令模拟的是本地栈里 TEE watcher 的动作；真实 TEE extension 的 watcher 有 77 个测试覆盖。 |
+| **操作说明** | ① 回到仓库根目录终端，敲一条命令：`./scripts/demo-settle.sh`。它会打印 `① FLR/USD drops…` `② TEE reveals… settles…` `✓ Settled`。② 立刻切到浏览器 Tab 1（最好提前把浏览器和终端左右分屏），等约 2 秒，订单行从 **Pending 翻成 Executed**，SETTLED PRICE 显示 **$0.015**，TXS 列多出 `executed 0x…`，镜头停 4 秒。注意：`demo-settle.sh` 里两条命令模拟的是本地栈里 TEE watcher 的动作；真实 TEE extension 的 watcher 有 77 个测试覆盖。 |
 
 ## Scene 4 — Real Coston2 deployment + fork tests (1:50–2:25)
 
