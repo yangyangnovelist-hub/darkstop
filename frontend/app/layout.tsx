@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DarkStop — confidential stop-loss on Flare",
+  title: "DarkStop: confidential stop-loss on Flare",
   description:
     "Place stop-loss orders whose trigger price never touches the chain: ECIES-encrypted to a TEE, settled against the live FTSO feed.",
 };

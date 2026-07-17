@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { parseEther, parseUnits } from "viem";
+import { formatEther, parseEther, parseUnits } from "viem";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
 import { chain, txUrl } from "@/lib/chain";
 import { VAULT_ADDRESS, vaultAbi } from "@/lib/vault";
@@ -13,6 +13,18 @@ type Phase =
   | { kind: "signing" }
   | { kind: "sent"; hash: string }
   | { kind: "error"; message: string };
+
+// Turn cryptic wallet/RPC errors into something a person can act on.
+function humanizeError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const first = raw.split("\n")[0];
+  const lower = raw.toLowerCase();
+  if (lower.includes("user rejected") || lower.includes("user denied"))
+    return "Transaction cancelled in your wallet.";
+  if (lower.includes("insufficient funds"))
+    return "Not enough balance for the deposit plus the instruction fee.";
+  return first;
+}
 
 export function OrderForm() {
   const { isConnected, chainId } = useAccount();
@@ -60,9 +72,7 @@ export function OrderForm() {
       });
       setPhase({ kind: "sent", hash });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message.split("\n")[0] : String(err);
-      setPhase({ kind: "error", message });
+      setPhase({ kind: "error", message: humanizeError(err) });
     }
   }
 
@@ -83,9 +93,7 @@ export function OrderForm() {
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-sm text-zinc-400">
-          Trigger price (USD per FLR) — sell if price drops to or below
-        </span>
+        <span className="text-sm text-zinc-400">Trigger price (USD per FLR)</span>
         <input
           value={trigger}
           onChange={(e) => setTrigger(e.target.value)}
@@ -97,10 +105,15 @@ export function OrderForm() {
       </label>
 
       <p className="text-xs text-zinc-500">
-        Trigger price is ECIES-encrypted in your browser to the TEE&apos;s
-        enclave key before it is sent.
+        Sells when FLR falls to or below this price. The trigger is
+        ECIES-encrypted in your browser to the TEE&apos;s enclave key before it
+        is sent.
         {fee !== undefined && (
-          <> Instruction fee: {fee.toString()} wei (added to your deposit).</>
+          <>
+            {" "}
+            Instruction fee: {formatEther(fee)} {chain.nativeCurrency.symbol}{" "}
+            (added to your deposit).
+          </>
         )}
       </p>
 

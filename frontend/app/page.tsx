@@ -23,7 +23,7 @@ export default function Home() {
 
       <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-6 py-5">
         <p className="text-lg font-medium text-emerald-300">
-          Your trigger price never touches the chain —{" "}
+          Your trigger price never touches the chain.{" "}
           {vaultUrl ? (
             <a
               href={vaultUrl}
@@ -31,17 +31,17 @@ export default function Home() {
               rel="noreferrer"
               className="underline decoration-emerald-500/60 underline-offset-4 hover:text-emerald-200"
             >
-              inspect the calldata yourself
+              Inspect the calldata yourself
             </a>
           ) : (
-            "inspect the calldata yourself"
+            "Inspect the calldata yourself"
           )}
           .
         </p>
         <p className="mt-1 text-sm text-zinc-400">
           Orders carry only an ECIES ciphertext, decrypted inside a TEE. At
-          settlement the vault re-verifies the live FTSO FLR/USD feed on chain
-          — the TEE is never trusted with your funds alone.
+          settlement the vault re-verifies the live FTSO FLR/USD feed on chain;
+          the TEE is never trusted with your funds alone.
         </p>
       </section>
 
@@ -55,7 +55,7 @@ export default function Home() {
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6">
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-zinc-400">
-            Orders (live from vault events)
+            Orders
           </h2>
           <OrdersTable />
         </section>
