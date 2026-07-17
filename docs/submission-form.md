@@ -29,9 +29,9 @@ Bounty 2 — Confidential Compute Apps
 ```
 On-chain stop-loss orders leak the one thing they must protect: the trigger price. It sits in public contract storage or a keeper's mempool, so anyone can read every trader's liquidation level, push the price to it, and absorb the forced sell. Centralized exchanges hide your stops; DeFi today cannot.
 
-DarkStop fixes this with Flare Confidential Compute. The trigger price is ECIES-encrypted in the browser to the TEE extension's enclave key. On-chain, placeOrder(ciphertext) stores only the deposit and an opaque blob — inspect the calldata yourself, there is no price anywhere. The ciphertext is forwarded through the FCC instruction flow to a Go TEE extension that decrypts it, keeps the order in enclave memory, and watches the FTSO FLR/USD feed. When the price crosses the trigger, the extension submits settle() — and the contract still does not trust the TEE alone: settle() re-reads the live FTSO feed on-chain and requires a fresh price at-or-below the revealed trigger before paying out in USDT0.
+DarkStop fixes this with Flare Confidential Compute. The trigger price is ECIES-encrypted in the browser to the TEE extension's enclave key. On-chain, placeOrder(ciphertext) stores only the deposit and an opaque blob — inspect the calldata yourself; there is no price anywhere. The ciphertext is forwarded through the FCC instruction flow to a Go TEE extension that decrypts it, keeps the order in enclave memory, and watches the FTSO FLR/USD feed. When the price crosses the trigger, the extension submits settle() — and the contract still does not trust the TEE alone: settle() re-reads the live FTSO feed on-chain and requires a fresh price at-or-below the revealed trigger before paying out in USDT0.
 
-What works today: the vault is deployed and registered on Coston2 (extension id 503, TEE machine registered on-chain); the full place → trigger → settle → UI-flip loop runs end-to-end on a local dev stack; Coston2 fork tests place and settle orders against the REAL live FTSO feed; and the browser encryptor is proven wire-compatible with go-ethereum's ECIES by a cross-language conformance suite. 112 tests total (20 Foundry unit + 4 Coston2 fork + 77 Go + 11 frontend).
+What works today: the vault is deployed and registered on Coston2 (extension id 503, TEE machine registered on-chain); the full place → trigger → settle → UI-flip loop runs end-to-end on a local dev stack; Coston2 fork tests place and settle orders against the real live FTSO feed; and the browser encryptor is proven wire-compatible with go-ethereum's ECIES by a cross-language conformance suite. 112 tests total (20 Foundry unit + 4 Coston2 fork + 77 Go + 11 frontend).
 
 Honesty section: the TEE runs in simulated mode — the mode the official scaffold supports for Coston2, and the Flare team confirmed in the hackathon Telegram that the Coston2 simulated approach is accepted for judging. Live-testnet placeOrder is currently gated on the Flare-side FTDC proxy producing an availability proof for our registered machine (our proxy is provably healthy — Flare's proxy polls its TEE_INFO every ~10s); this is documented and escalated. Full account in docs/coston2-runbook.md.
 ```
@@ -45,15 +45,15 @@ TODO — YouTube (unlisted) URL after recording per docs/demo-video-script.md
 ## GitHub repo link
 
 ```
-TODO — public repo URL after pushing (e.g. https://github.com/<username>/darkstop)
+TODO — public repo URL after pushing (e.g. https://github.com/yangyangnovelist-hub/darkstop)
 ```
 
 ## How the project uses Flare
 
 ```
-FCC (Flare Confidential Compute) — full lifecycle, not a toy call: DarkStopVault is a real FCC instruction sender. Extension registered on TeeExtensionRegistry (id 503), instruction fee paid through sendInstructions, OPType/OPCommand (DARKSTOP / PLACE_ORDER / CANCEL_ORDER) mirrored byte-for-byte across Solidity constants, Go config, and decoder registration, TEE machine registered on-chain. The product is impossible as a plain smart contract — the confidentiality IS the product, and it comes from the TEE.
+FCC (Flare Confidential Compute) — full lifecycle, not a toy call: DarkStopVault is a real FCC instruction sender. Extension registered on TeeExtensionRegistry (id 503), instruction fee paid through sendInstructions, OPType/OPCommand (DARKSTOP / PLACE_ORDER / CANCEL_ORDER) mirrored byte-for-byte across Solidity constants, Go config, and decoder registration, TEE machine registered on-chain. The product is impossible as a plain smart contract — the confidentiality is the product, and it comes from the TEE.
 
-FTSO — used twice, deliberately:
+FTSO — used in two places:
 1. Inside the TEE: the watcher polls the block-latency FLR/USD feed to detect trigger crossings privately, so monitoring leaks nothing.
 2. On-chain at settlement: settle() calls FtsoV2.getFeedById(FLR_USD) itself and requires the price to be fresh (maxAgeSec staleness window) and at-or-below the revealed trigger. The contract never trusts the TEE's price report alone — FTSO is the on-chain arbiter.
 ```

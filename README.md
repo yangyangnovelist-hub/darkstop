@@ -17,7 +17,7 @@ DeFi today cannot.
 DarkStop keeps the trigger price ECIES-encrypted end-to-end: encrypted in the
 browser to the TEE extension's enclave key, opaque in the on-chain calldata,
 decrypted and monitored only inside the TEE (Flare Confidential Compute). The
-chain learns the trigger only at settlement — and even then the contract does
+chain learns the trigger only at settlement. Even then, the contract does
 not trust the TEE alone: `settle()` re-reads the live FTSO FLR/USD feed and
 requires a fresh price at-or-below the revealed trigger before paying out.
 
@@ -90,9 +90,9 @@ FCC instruction sender: extension registered on `TeeExtensionRegistry`
 (extension id 503), instruction fee paid through `sendInstructions`, OPType /
 OPCommand constants mirrored byte-for-byte across Solidity, Go config, and
 decoder registration, and the TEE machine registered on-chain. The product is
-impossible as a plain smart contract — the confidentiality comes from the TEE.
+impossible as a plain smart contract. The confidentiality comes from the TEE.
 
-**FTSO — used twice, deliberately.**
+**FTSO — used in two places.**
 
 1. *Inside the TEE*: the watcher polls the block-latency FLR/USD feed to
    detect trigger crossings privately.
