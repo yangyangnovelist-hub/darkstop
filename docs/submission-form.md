@@ -1,8 +1,8 @@
 # DoraHacks BUIDL Submission — Pre-filled Fields
 
 Copy-paste each field below into the DoraHacks BUIDL form for **Flare Summer
-Signal**. Replace the two `TODO` placeholders (demo video URL, public repo
-URL) before submitting. Everything else is final text.
+Signal**. Replace the remaining `TODO` placeholder (demo video URL) before
+submitting. The public repository URL is already final.
 
 ---
 
@@ -45,7 +45,7 @@ TODO — YouTube (unlisted) URL after recording per docs/demo-video-script.md
 ## GitHub repo link
 
 ```
-TODO — public repo URL after pushing (e.g. https://github.com/yangyangnovelist-hub/darkstop)
+https://github.com/yangyangnovelist-hub/darkstop
 ```
 
 ## How the project uses Flare
@@ -91,7 +91,7 @@ FtsoV2 (resolved via FlareContractRegistry): 0xC4e9c78EA53db782E28f28Fdf80BaF593
 
 ## 提交时的操作提醒（中文，不要粘贴进表单）
 
-1. 先把仓库推到 GitHub 公开 repo，把 URL 填进上面第二个 TODO。
+1. 确认公开仓库 `https://github.com/yangyangnovelist-hub/darkstop` 已同步最新 `main`。
 2. 按 `docs/demo-video-script.md` 录好视频，传 YouTube（Unlisted），URL 填第一个 TODO。
 3. DoraHacks 上确认选择的是 Flare Summer Signal 活动下的 Bounty 2（Confidential Compute）。
 4. 提交后到 BUIDL 页面的 "Ask Question" 标签发一条留言确认收到（例如 "Submitted for Bounty 2 — please confirm receipt"）。

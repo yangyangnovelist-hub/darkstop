@@ -44,11 +44,14 @@ cast estimate $VAULT 'placeOrder(bytes)' 0xabab…(64 bytes) --value 0.5ether \
 ```
 
 `placeOrder` → `_sendInstruction` → `TEE_MACHINE_REGISTRY.getRandomTeeIds(503, 1)` reverts
-`TooMany()` because **zero TEE machines are registered for extension 503**. Machine
-registration (`post-build.sh`) requires the extension proxy, which is still blocked on
-Coston2 indexer DB credentials (see `docs/spike-notes.md` — asked in the Flare Hackathon
-Telegram). No gas was wasted on a mined revert; the estimate was left as the record.
-Re-run the placeOrder + cancel smoke after `post-build.sh` succeeds.
+`TooMany()` because no machine for extension 503 has reached the production set. Our
+simulated TEE machine completed the on-chain registration and availability-request steps
+(`config/register-tee.state` records `completed_steps: "ra"`), but Flare's Coston2 FTDC
+proxy still returns HTTP 404 for the resulting availability proof. Flare confirmed that
+FCC is being reworked on Coston2 and that this failure is infrastructure-side; see
+`docs/coston2-runbook.md` for the full trace and ruling. The same 404 was re-verified on
+2026-07-18. No gas was wasted on a mined revert; the estimate was left as the record.
+Re-run the placeOrder + cancel smoke only after Flare restores FTDC proof production.
 
 ### Compensating verification: Coston2 fork suite (live FTSO, mocked TEE registries)
 
