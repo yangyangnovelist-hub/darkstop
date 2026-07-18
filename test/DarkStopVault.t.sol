@@ -65,6 +65,7 @@ contract DarkStopVaultTest is Test {
         assertEq(vault.OP_COMMAND_PLACE(), bytes32("PLACE_ORDER"));
         assertEq(vault.OP_COMMAND_CANCEL(), bytes32("CANCEL_ORDER"));
         assertEq(vault.FLR_USD(), bytes21(0x01464c522f55534400000000000000000000000000));
+        assertEq(vault.MAX_PRICE_AGE_SEC(), 300);
     }
 
     // ---------------------------------------------------------------
@@ -196,6 +197,14 @@ contract DarkStopVaultTest is Test {
         vm.prank(executor);
         vm.expectRevert(bytes("stale price"));
         vault.settle(id, 25_000, 300);
+    }
+
+    function test_Settle_RevertsIfExecutorTriesToRelaxPriceFreshness() public {
+        uint256 id = _placeAliceOrder();
+
+        vm.prank(executor);
+        vm.expectRevert(bytes("max age exceeds protocol limit"));
+        vault.settle(id, 25_000, 301);
     }
 
     function test_Settle_RevertsIfPriceAboveTrigger() public {

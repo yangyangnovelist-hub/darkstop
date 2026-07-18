@@ -66,7 +66,8 @@ of the official [`flare-foundation/fce-extension-scaffold`](https://github.com/f
 - **`contracts/DarkStopVault.sol`** — deposit vault + FCC instruction sender.
   `placeOrder(bytes ciphertext)` stores the deposit and forwards the encrypted
   blob (no price data on chain), `settle()` verifies the TEE executor and
-  re-checks the live FTSO price with a staleness window, `cancel()` refunds.
+  re-checks the live FTSO price with a contract-capped 300-second staleness
+  window, `cancel()` refunds.
   Plus `MockUSDT0.sol` as the testnet payout token.
 - **Go TEE extension** — `PLACE_ORDER` / `CANCEL_ORDER` handlers, ECIES
   decryption (go-ethereum `crypto/ecies`), an in-enclave order store, and an
@@ -79,9 +80,10 @@ of the official [`flare-foundation/fce-extension-scaffold`](https://github.com/f
   JS-encrypt → Go-decrypt interop is proven by a conformance suite against a
   Go-produced test vector. Live order table flips Pending → Executed from
   chain events.
-- **Tooling** — Coston2 deployment pipeline, a one-shot local dev stack
-  (`scripts/dev-stack.sh`), fork tests against the real Coston2 FTSO, and a
-  bring-up runbook for the Coston2 TEE proxy.
+- **Tooling** — Coston2 deployment pipeline, a one-command local proof
+  (`scripts/demo-e2e.sh`) that exercises the real Go decrypt/store/watcher
+  path, fork tests against the real Coston2 FTSO, and a bring-up runbook for
+  the Coston2 TEE proxy.
 
 ## Flare integration
 
@@ -98,11 +100,13 @@ impossible as a plain smart contract. The confidentiality comes from the TEE.
    detect trigger crossings privately.
 2. *On-chain at settlement*: `settle()` calls
    `FtsoV2.getFeedById(FLR_USD)` itself and requires the price to be fresh
-   (`maxAgeSec`) and at-or-below the revealed trigger. The contract never
-   trusts the TEE's price report alone.
+   and at-or-below the revealed trigger. The executor may request a stricter
+   window, but the contract caps it at 300 seconds. The contract never trusts
+   the TEE's price report alone.
 
 ```solidity
 (uint256 value, int8 decimals, uint64 timestamp) = FTSO_V2.getFeedById(FLR_USD);
+require(_maxAgeSec <= MAX_PRICE_AGE_SEC, "max age too large");
 require(block.timestamp - timestamp <= _maxAgeSec, "stale price");
 require(price <= _triggerPrice, "price above trigger");
 ```
@@ -147,29 +151,30 @@ Stated plainly, because judges should not have to dig for this:
 
 ## Run it yourself
 
-**Local dev stack** (anvil + mocks, full browser flow, ~2 minutes):
+**Local end-to-end proof** (anvil + mocks + real Go extension/watcher):
 
 ```bash
-./scripts/dev-stack.sh        # anvil + mock FTSO + vault, writes frontend/.env.local
-cd frontend && npm install && npm run dev   # http://localhost:3000
+./scripts/demo-e2e.sh
 ```
 
-Place an order in the UI, then simulate the price crossing and the TEE settle
-with `cast` — the row flips Pending → Executed live. Step-by-step walkthrough:
-[`frontend/README.md`](frontend/README.md).
+The script encrypts and places an order, delivers the official FCC action shape
+to the Go extension, proves the enclave stored it, changes only the mock FTSO
+price, and waits for the real watcher to submit and confirm `settle()`. To watch
+the same state transition in the UI, start `cd frontend && npm run dev` after
+`scripts/dev-stack.sh`. Step-by-step walkthrough: [`frontend/README.md`](frontend/README.md).
 
 **Coston2 TEE bring-up** (proxy, ngrok, machine registration):
 [`docs/coston2-runbook.md`](docs/coston2-runbook.md).
 
 ## Test evidence
 
-112 tests across the three layers:
+114 tests across the three layers:
 
 | Suite | Count | Command |
 |---|---|---|
-| Vault unit tests (mocked FTSO/registries) | 20 | `forge test` |
+| Vault unit tests (mocked FTSO/registries) | 21 | `forge test` |
 | Coston2 fork tests (real FtsoV2, live feed) | 4 | `forge test --match-contract DarkStopVaultForkTest --fork-url https://coston2-api.flare.network/ext/C/rpc` |
-| Go extension (decoders, ECIES, store, handlers, watcher) | 77 | `go test ./...` |
+| Go extension (decoders, ECIES, store, handlers, watcher) | 78 | `go test ./...` |
 | Frontend ECIES conformance (JS encrypt ↔ Go vector) | 11 | `cd frontend && npm test` |
 
 The fork suite self-skips when not on a Coston2 fork, so plain `forge test`

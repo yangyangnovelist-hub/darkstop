@@ -9,8 +9,9 @@ recording; it never appears in the video.
 Total target length: ~3:00. Practice each scene once before recording.
 
 > **注意**: 本流程走 MetaMask-free 路线 —— 下单由命令行脚本 `frontend/scripts/place-order.ts`
-> 完成（它用和浏览器完全相同的加密库把触发价加密后 placeOrder），撤单/结算用
-> `scripts/demo-settle.sh`。全程零钱包配置，已在本机端到端验证通过。
+> 完成（它用和浏览器完全相同的加密库加密、placeOrder，并把 FCC action 交给真实
+> Go extension），`scripts/demo-settle.sh` 只降低 FTSO 价格，结算由 watcher 自动发起。
+> 全程零钱包配置，已在本机端到端验证通过。
 
 ## Preparation (before recording — 录制前准备, 不计入视频)
 
@@ -51,17 +52,17 @@ Total target length: ~3:00. Practice each scene once before recording.
 
 | | |
 |---|---|
-| **Screen** | Split view or quick switch: terminal + browser Tab 1 side by side if possible. Terminal: run the two `cast send` commands (price drop, then settle). Browser: the order row flips **Pending → Executed** within ~2 seconds. Hold on the flipped row. |
+| **Screen** | Split view or quick switch: terminal + browser Tab 1 side by side if possible. Terminal: run `./scripts/demo-settle.sh`; it changes only the mock FTSO price, then prints that the Go watcher submitted settlement. Browser: the order row flips **Pending → Executed**. Hold on the flipped row. |
 | **Captions** | 1. `FLR/USD drops below the trigger.` 2. `The TEE reveals the trigger and settles on-chain.` 3. `Pending → Executed. Payout in USDT0. No human touched it.` |
-| **操作说明** | ① 回到仓库根目录终端，敲一条命令：`./scripts/demo-settle.sh`。它会打印 `① FLR/USD drops…` `② TEE reveals… settles…` `✓ Settled`。② 立刻切到浏览器 Tab 1（最好提前把浏览器和终端左右分屏），等约 2 秒，订单行从 **Pending 翻成 Executed**，SETTLED PRICE 显示 **$0.015**，TXS 列多出 `executed 0x…`，镜头停 4 秒。注意：`demo-settle.sh` 里两条命令模拟的是本地栈里 TEE watcher 的动作；真实 TEE extension 的 watcher 有 77 个测试覆盖。 |
+| **操作说明** | ① 回到仓库根目录终端，敲：`./scripts/demo-settle.sh`。它只会调用 mock FTSO 的 `setFeed`，不会调用 vault 的 `settle`；随后等待真实 Go watcher 自动提交交易，并打印 `✓ Watcher-settled`。② 切到浏览器 Tab 1，等订单从 **Pending 翻成 Executed**，SETTLED PRICE 显示 **$0.015**，镜头停 4 秒。可在镜头末尾快速展示 `/tmp/darkstop-extension.log` 中的 `settle tx sent` / `settle confirmed`。 |
 
 ## Scene 4 — Real Coston2 deployment + fork tests (1:50–2:25)
 
 | | |
 |---|---|
-| **Screen** | Browser Tab 3: Coston2 explorer page of the vault (`0xd93E…D8bF`) — scroll slowly past the contract header and transactions. Then terminal: run the fork test command; end state = green `4 passed` against the live FTSO. Then `forge test` summary (`20 passed`) and `go test ./...` (`ok` lines). |
-| **Captions** | 1. `The vault is live on Flare Coston2 testnet.` 2. `Fork tests settle against the REAL FTSO feed.` 3. `20 unit + 4 fork + 77 Go tests. All green.` |
-| **操作说明** | ① 切浏览器 Tab 3，缓慢滚动合约页 5 秒。② 切终端，敲：`forge test --match-contract DarkStopVaultForkTest --fork-url https://coston2-api.flare.network/ext/C/rpc`，等绿色 `4 passed`（约 30 秒，可后期剪快）。③ 再敲 `forge test`（很快，20 passed）。④ 再敲 `go test ./...`，出现整列 `ok`。每个绿色结果停 2-3 秒。 |
+| **Screen** | Browser Tab 3: Coston2 explorer page of the vault (`0xd93E…D8bF`) — scroll slowly past the contract header and transactions. Then terminal: run the fork test command; end state = green `4 passed` against the live FTSO. Then `forge test` summary (`21 passed`) and `go test ./...` (`ok` lines). |
+| **Captions** | 1. `The vault is live on Flare Coston2 testnet.` 2. `Fork tests settle against the REAL FTSO feed.` 3. `21 unit + 4 fork + 78 Go tests. All green.` |
+| **操作说明** | ① 切浏览器 Tab 3，缓慢滚动合约页 5 秒。② 切终端，敲：`forge test --match-contract DarkStopVaultForkTest --fork-url https://coston2-api.flare.network/ext/C/rpc`，等绿色 `4 passed`（约 30 秒，可后期剪快）。③ 再敲 `forge test`（很快，21 passed）。④ 再敲 `go test ./...`，出现整列 `ok`。每个绿色结果停 2-3 秒。 |
 
 ## Scene 5 — The code that keeps the TEE honest (2:25–2:45)
 

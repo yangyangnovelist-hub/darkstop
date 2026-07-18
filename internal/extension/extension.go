@@ -32,9 +32,15 @@ type Extension struct {
 // HTTP routes. It panics if key generation fails (extension cannot operate
 // without its decryption identity).
 func New(extensionPort, signPort int) *Extension {
-	c, err := NewCrypto()
+	var c *Crypto
+	var err error
+	if config.EnclavePrivateKey != "" {
+		c, err = NewCryptoFromHex(config.EnclavePrivateKey)
+	} else {
+		c, err = NewCrypto()
+	}
 	if err != nil {
-		panic(fmt.Sprintf("generating enclave keypair: %v", err))
+		panic(fmt.Sprintf("initializing enclave keypair: %v", err))
 	}
 
 	e := &Extension{crypto: c, store: NewStore()}

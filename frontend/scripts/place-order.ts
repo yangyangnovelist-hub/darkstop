@@ -5,7 +5,16 @@
 //   cd frontend && npx tsx scripts/place-order.ts
 //
 // Reads config from .env.local (vault address, RPC, fixture pubkey).
-import { createWalletClient, createPublicClient, http, parseEther } from "viem";
+import {
+  createWalletClient,
+  createPublicClient,
+  encodeAbiParameters,
+  http,
+  parseEther,
+  parseEventLogs,
+  stringToHex,
+  toHex,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { readFileSync } from "node:fs";
 import { encryptTriggerPrice } from "../lib/ecies";
@@ -20,7 +29,8 @@ const env = Object.fromEntries(
 
 const RPC = env.NEXT_PUBLIC_RPC_URL;
 const VAULT = env.NEXT_PUBLIC_VAULT_ADDRESS as `0x${string}`;
-const TEE_PUBKEY = env.DEV_FALLBACK_TEE_PUBKEY;
+const TEE_STATE_URL = env.TEE_STATE_URL;
+const TEE_ACTION_URL = env.TEE_ACTION_URL;
 // anvil funded account #0 — local dev only, never a real key.
 const ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
@@ -35,7 +45,13 @@ async function main() {
   // Dev-stack instruction fee is a fixed 0.01 ETH (verified via `cast call INSTRUCTION_FEE`).
   const fee = parseEther("0.01");
 
-  const ciphertext = encryptTriggerPrice(TEE_PUBKEY, TRIGGER_6DEC);
+  const stateRes = await fetch(TEE_STATE_URL);
+  if (!stateRes.ok) throw new Error(`TEE state returned ${stateRes.status}`);
+  const stateBody = await stateRes.json();
+  const teePubkey = stateBody?.state?.encryptionPubKey;
+  if (!teePubkey) throw new Error("TEE state has no encryptionPubKey");
+
+  const ciphertext = encryptTriggerPrice(teePubkey, TRIGGER_6DEC);
   console.log(`Encrypted trigger $0.02 → ${ciphertext.slice(0, 42)}… (${(ciphertext.length - 2) / 2} bytes)`);
 
   const hash = await wallet.writeContract({
@@ -45,7 +61,51 @@ async function main() {
   console.log(`placeOrder tx: ${hash}`);
   const rcpt = await pub.waitForTransactionReceipt({ hash });
   console.log(`mined in block ${rcpt.blockNumber}, status ${rcpt.status}`);
-  console.log("→ the order should now appear as Pending in the UI.");
+
+  const placed = parseEventLogs({
+    abi: vaultAbi,
+    logs: rcpt.logs,
+    eventName: "OrderPlaced",
+  })[0];
+  if (!placed) throw new Error("placeOrder receipt has no OrderPlaced event");
+
+  const originalMessage = encodeAbiParameters(
+    [{ type: "uint256" }, { type: "bytes" }],
+    [placed.args.orderId, ciphertext],
+  );
+  const dataFixed = {
+    instructionId: `0x${"12".repeat(32)}`,
+    teeId: `0x${"7e".repeat(20)}`,
+    timestamp: 0,
+    rewardEpochId: 0,
+    opType: stringToHex("DARKSTOP", { size: 32 }),
+    opCommand: stringToHex("PLACE_ORDER", { size: 32 }),
+    cosigners: [],
+    cosignersThreshold: 0,
+    originalMessage,
+  };
+  const action = {
+    data: {
+      id: `0x${"34".repeat(32)}`,
+      type: "instruction",
+      submissionTag: "submit",
+      message: toHex(JSON.stringify(dataFixed)),
+    },
+    additionalVariableMessages: [],
+    timestamps: [],
+    additionalActionData: "0x",
+    signatures: [],
+  };
+  const actionRes = await fetch(TEE_ACTION_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(action),
+  });
+  const actionResult = await actionRes.json();
+  if (!actionRes.ok || actionResult?.status !== 1) {
+    throw new Error(`TEE rejected instruction: ${JSON.stringify(actionResult)}`);
+  }
+  console.log(`TEE decrypted and accepted order #${placed.args.orderId}; watcher is live.`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

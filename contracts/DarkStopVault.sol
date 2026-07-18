@@ -44,6 +44,9 @@ contract DarkStopVault {
     /// @notice Decimals of the payout token (USDT0).
     uint8 public constant PAYOUT_DECIMALS = 6;
 
+    /// @notice Protocol-level ceiling for an acceptable FTSO price age.
+    uint256 public constant MAX_PRICE_AGE_SEC = 300;
+
     uint8 public constant STATUS_NONE = 0;
     uint8 public constant STATUS_OPEN = 1;
     uint8 public constant STATUS_EXECUTED = 2;
@@ -179,6 +182,7 @@ contract DarkStopVault {
     /// @param _maxAgeSec Maximum accepted FTSO price age in seconds.
     function settle(uint256 _orderId, uint256 _triggerPrice, uint256 _maxAgeSec) external {
         require(msg.sender == teeExecutor, "not tee executor");
+        require(_maxAgeSec <= MAX_PRICE_AGE_SEC, "max age exceeds protocol limit");
         Order storage order = orders[_orderId];
         require(order.status == STATUS_OPEN, "order not open");
 

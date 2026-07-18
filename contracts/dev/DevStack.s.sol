@@ -37,10 +37,10 @@ contract DevStack is Script {
         // settle() can be simulated with a plain `cast send`.
         vault.setTeeExecutor(msg.sender);
 
-        // 1,000,000 USDT0 payout pool + a fresh FLR/USD price of $0.02
-        // (value 200000, feed decimals 7 — same fixture as the unit tests).
+        // 1,000,000 USDT0 payout pool + a fresh FLR/USD price of $0.03,
+        // above the demo trigger so the real watcher waits for the price drop.
         usdt0.mint(address(vault), 1_000_000e6);
-        ftso.setFeed(200_000, 7, uint64(block.timestamp));
+        ftso.setFeed(300_000, 7, uint64(block.timestamp));
 
         vm.stopBroadcast();
 

@@ -21,10 +21,10 @@ see `../docs/deployments.md`). Override via `.env.local`:
 | `TEE_STATE_URL` | `http://localhost:7702/state` | TEE extension `/state` (proxied server-side by `/api/tee-state`) |
 | `DEV_FALLBACK_TEE_PUBKEY` | unset | Local-dev-only pubkey used when the TEE is unreachable |
 
-## Local development stack (no testnet, no real TEE)
+## Local development stack (simulated enclave, real extension code)
 
 ```bash
-# from the repo root — starts anvil, deploys mocks + vault, writes .env.local
+# from the repo root — starts anvil, deploys mocks + vault, starts Go extension/watcher
 ./scripts/dev-stack.sh
 
 cd frontend
@@ -34,32 +34,34 @@ npm run dev          # http://localhost:3000
 
 Then:
 
-1. In MetaMask add a network: RPC `http://127.0.0.1:8545`, chain id `31337`,
-   and import anvil key #0
-   (`0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`).
-2. Place an order in the UI (e.g. deposit `1`, trigger `0.02`). The trigger is
-   encrypted to the repo's ECIES fixture key (`internal/extension/testdata/
-   ecies_vector.json`) because no TEE extension runs locally — the `/api/tee-state`
-   proxy falls back to `DEV_FALLBACK_TEE_PUBKEY`. If you run the real extension
-   on port 7702, the proxy uses its live enclave key instead.
-3. Simulate the price crossing and the TEE settle (addresses are printed by
-   `dev-stack.sh` and recorded as comments in `.env.local`):
+1. Place and relay a deterministic encrypted order through the same TypeScript
+   encryption library used by the browser:
 
    ```bash
-   export PATH="$HOME/.foundry/bin:$PATH"
-   # drop FLR/USD to $0.015 with a fresh timestamp
-   cast send $FTSO 'setFeed(uint256,int8,uint64)' 150000 7 $(date +%s) \
-     --rpc-url http://127.0.0.1:8545 --private-key <anvil key #0>
-   # TEE executor (= deployer locally) reveals trigger 20000 and settles order 1
-   cast send $VAULT 'settle(uint256,uint256,uint256)' 1 20000 300 \
-     --rpc-url http://127.0.0.1:8545 --private-key <anvil key #0>
+   cd frontend
+   npx tsx scripts/place-order.ts
    ```
 
-4. The order row flips **Pending → Executed** in the UI within ~2s (event
-   polling). `cancel` from the UI flips it to **Cancelled** and refunds.
+   The script gets the live enclave public key, encrypts the trigger, calls
+   `placeOrder`, and relays the official tee-node action/data encoding to the
+   running Go extension. The extension decrypts and stores the order.
 
-Tear down: `./scripts/dev-stack.sh stop` (and delete `frontend/.env.local`
-to point the UI back at Coston2).
+2. Change only the mock FTSO price:
+
+   ```bash
+   cd ..
+   ./scripts/demo-settle.sh
+   ```
+
+   `demo-settle.sh` never calls `settle()`. The Go watcher observes the price,
+   submits settlement, confirms the receipt, and marks enclave state executed.
+   The browser order row flips **Pending → Executed** from chain events.
+
+For a terminal-only proof of the full path, run `./scripts/demo-e2e.sh` from a
+clean shell. It prints final enclave state and watcher transaction evidence.
+
+Tear down: `./scripts/dev-stack.sh stop`. Delete `frontend/.env.local` to point
+the UI back at Coston2.
 
 ## Scripts
 

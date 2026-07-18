@@ -59,6 +59,21 @@ func newTestExtension(t *testing.T) *Extension {
 	return New(0, 0)
 }
 
+func TestNewUsesConfiguredEnclaveKey(t *testing.T) {
+	original := config.EnclavePrivateKey
+	t.Cleanup(func() { config.EnclavePrivateKey = original })
+	config.EnclavePrivateKey = "0x1c0de4c52869d470c8d9a120a13f37192f119b13d56d9f327f4ab32912c6db89"
+
+	e := New(0, 0)
+	expected, err := NewCryptoFromHex(config.EnclavePrivateKey)
+	if err != nil {
+		t.Fatalf("importing expected key: %v", err)
+	}
+	if e.crypto.PublicKeyHex() != expected.PublicKeyHex() {
+		t.Fatalf("configured enclave key not used: got %s want %s", e.crypto.PublicKeyHex(), expected.PublicKeyHex())
+	}
+}
+
 // encryptTrigger encrypts a {"triggerPrice": ...} payload to the extension's
 // own enclave key, as a browser client would with the pubkey from /state.
 func encryptTrigger(t *testing.T, e *Extension, triggerPrice string) []byte {

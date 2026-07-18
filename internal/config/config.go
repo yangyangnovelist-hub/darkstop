@@ -24,8 +24,8 @@ const (
 
 // Defaults.
 var (
-	ExtensionPort  = 8080
-	SignPort       = 9090
+	ExtensionPort   = 8080
+	SignPort        = 9090
 	TypesServerPort = 8100
 
 	// Watcher wiring (no defaults — the watcher only starts when all
@@ -33,6 +33,9 @@ var (
 	ChainURL           = ""
 	VaultAddress       = ""
 	ExecutorPrivateKey = ""
+	// Optional deterministic enclave identity for local demos. Production
+	// leaves this empty so the extension generates a fresh key in the TEE.
+	EnclavePrivateKey = ""
 )
 
 // Environment variables override defaults.
@@ -44,6 +47,7 @@ func init() {
 	ChainURL = os.Getenv("CHAIN_URL")
 	VaultAddress = os.Getenv("VAULT_ADDRESS")
 	ExecutorPrivateKey = os.Getenv("EXECUTOR_PRIVATE_KEY")
+	EnclavePrivateKey = os.Getenv("ENCLAVE_PRIVATE_KEY")
 
 	if ep != "" {
 		if v, err := strconv.Atoi(ep); err == nil {
