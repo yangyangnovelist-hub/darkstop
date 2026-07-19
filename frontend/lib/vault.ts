@@ -25,6 +25,24 @@ export const vaultAbi = [
     outputs: [{ type: "uint256" }],
   },
   {
+    type: "function",
+    name: "teeExecutor",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "address" }],
+  },
+  {
+    type: "function",
+    name: "orders",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "uint256" }],
+    outputs: [
+      { name: "owner", type: "address" },
+      { name: "deposit", type: "uint256" },
+      { name: "status", type: "uint8" },
+    ],
+  },
+  {
     type: "event",
     name: "OrderPlaced",
     inputs: [

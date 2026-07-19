@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	Version = "0.1.0"
+	Version = "0.2.0"
 
 	// Operation constants — must match the DarkStopVault.sol bytes32
 	// constants byte-for-byte (compared via teeutils.ToHash).
@@ -19,7 +19,7 @@ const (
 	TimeoutShutdown = 5 * time.Second
 
 	// WatcherInterval is how often the FTSO watcher polls the FLR/USD feed.
-	WatcherInterval = 5 * time.Second
+	WatcherInterval = 2 * time.Second
 )
 
 // Defaults.

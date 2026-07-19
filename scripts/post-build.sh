@@ -8,7 +8,7 @@
 #   NORMAL_PROXY_URL    — normal/FTDC proxy URL (default: http://localhost:6662)
 #   CHAIN_URL           — chain RPC URL (default: http://127.0.0.1:8545)
 #   ADDRESSES_FILE      — path to deployed-addresses.json (auto-detected if unset)
-#   TEE_VERSION         — version string (default: v0.1.0)
+#   TEE_VERSION         — version string (default: v0.2.0)
 #   LOCAL_MODE          — skip attestation (default: true)
 #   WAIT_TIMEOUT        — service wait timeout in seconds (default: 120)
 #   EXTENSION_OWNER_KEY — private key override for AddTeeVersion (optional)
@@ -45,7 +45,7 @@ ADDRESSES_FILE="${ADDRESSES_FILE:-}"
 if [[ -n "$ADDRESSES_FILE" && "$ADDRESSES_FILE" != /* ]]; then
     ADDRESSES_FILE="$PROJECT_DIR/$ADDRESSES_FILE"
 fi
-TEE_VERSION="${TEE_VERSION:-v0.1.0}"
+TEE_VERSION="${TEE_VERSION:-v0.2.0}"
 LOCAL_MODE="${LOCAL_MODE:-true}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-120}"
 

@@ -18,7 +18,12 @@ export async function GET() {
     if (fallback) {
       return Response.json({
         stateVersion: `0x${"0".repeat(64)}`,
-        state: { encryptionPubKey: fallback, openOrders: 0, orders: [] },
+        state: {
+          encryptionPubKey: fallback,
+          supportedPolicies: ["fixed"],
+          openOrders: 0,
+          orders: [],
+        },
         devFallback: true,
       });
     }

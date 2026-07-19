@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -72,31 +73,129 @@ func (c *Crypto) Decrypt(ciphertext []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// triggerPlaintext is the decrypted order payload:
-// {"triggerPrice":"<USD/FLR price as a positive integer, 6 decimals>"}.
+// triggerPlaintext is the decrypted tagged policy. Legacy fixed-price
+// plaintexts without strategy remain readable for deployed 0.1.0 clients.
 type triggerPlaintext struct {
-	TriggerPrice string `json:"triggerPrice"`
+	Strategy     string  `json:"strategy,omitempty"`
+	TriggerPrice *string `json:"triggerPrice,omitempty"`
+	TrailBps     *uint16 `json:"trailBps,omitempty"`
+}
+
+type OrderPolicy struct {
+	TriggerPrice *big.Int
+	TrailBps     uint16
+}
+
+func ParseOrderPlaintext(plaintext []byte) (OrderPolicy, error) {
+	if len(plaintext) == 0 || len(plaintext) > 1024 {
+		return OrderPolicy{}, fmt.Errorf("order plaintext must be between 1 and 1024 bytes")
+	}
+	if err := validateOrderJSONKeys(plaintext); err != nil {
+		return OrderPolicy{}, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(plaintext))
+	dec.DisallowUnknownFields()
+	var p triggerPlaintext
+	if err := dec.Decode(&p); err != nil {
+		return OrderPolicy{}, fmt.Errorf("decoding trigger plaintext: %w", err)
+	}
+	if err := ensureJSONEOF(dec); err != nil {
+		return OrderPolicy{}, err
+	}
+
+	// Legacy fixed payloads omitted strategy; keep those compatible.
+	strategy := p.Strategy
+	if strategy == "" && p.TriggerPrice != nil && p.TrailBps == nil {
+		strategy = "fixed"
+	}
+	switch strategy {
+	case "trailing":
+		if p.TriggerPrice != nil || p.TrailBps == nil {
+			return OrderPolicy{}, fmt.Errorf("trailing policy requires only trailBps")
+		}
+		if *p.TrailBps < 25 || *p.TrailBps > 5000 {
+			return OrderPolicy{}, fmt.Errorf("trailBps must be between 25 and 5000")
+		}
+		return OrderPolicy{TrailBps: *p.TrailBps}, nil
+	case "fixed":
+		if p.TriggerPrice == nil || p.TrailBps != nil || *p.TriggerPrice == "" {
+			return OrderPolicy{}, fmt.Errorf("fixed policy requires only triggerPrice")
+		}
+		trigger, ok := new(big.Int).SetString(*p.TriggerPrice, 10)
+		if !ok || trigger.Sign() <= 0 || trigger.BitLen() > 256 {
+			return OrderPolicy{}, fmt.Errorf("triggerPrice must be a positive uint256 base-10 integer")
+		}
+		return OrderPolicy{TriggerPrice: trigger}, nil
+	default:
+		return OrderPolicy{}, fmt.Errorf("strategy must be fixed or trailing")
+	}
+}
+
+// validateOrderJSONKeys rejects duplicate and case-variant keys before the
+// standard decoder can silently keep the last value. Order policies are flat,
+// so exact top-level keys make the signed plaintext unambiguous.
+func validateOrderJSONKeys(plaintext []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(plaintext))
+	first, err := dec.Token()
+	if err != nil {
+		return fmt.Errorf("decoding trigger plaintext: %w", err)
+	}
+	if delim, ok := first.(json.Delim); !ok || delim != '{' {
+		return fmt.Errorf("order plaintext must be a JSON object")
+	}
+	allowed := map[string]bool{"strategy": true, "triggerPrice": true, "trailBps": true}
+	seen := make(map[string]bool, len(allowed))
+	for dec.More() {
+		token, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("decoding order key: %w", err)
+		}
+		key, ok := token.(string)
+		if !ok {
+			return fmt.Errorf("order plaintext contains a non-string key")
+		}
+		if !allowed[key] {
+			return fmt.Errorf("unknown order field %q", key)
+		}
+		if seen[key] {
+			return fmt.Errorf("duplicate order field %q", key)
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return fmt.Errorf("decoding order field %q: %w", key, err)
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return fmt.Errorf("decoding order object end: %w", err)
+	}
+	if err := ensureJSONEOF(dec); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureJSONEOF(dec *json.Decoder) error {
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("order plaintext contains trailing JSON")
+		}
+		return fmt.Errorf("decoding trailing plaintext: %w", err)
+	}
+	return nil
 }
 
 // ParseTriggerPlaintext parses and validates a decrypted order payload,
 // returning the trigger price (USD per FLR, scaled to 6 decimals) as a
 // positive integer.
 func ParseTriggerPlaintext(plaintext []byte) (*big.Int, error) {
-	dec := json.NewDecoder(bytes.NewReader(plaintext))
-	dec.DisallowUnknownFields()
-	var p triggerPlaintext
-	if err := dec.Decode(&p); err != nil {
-		return nil, fmt.Errorf("decoding trigger plaintext: %w", err)
+	policy, err := ParseOrderPlaintext(plaintext)
+	if err != nil {
+		return nil, err
 	}
-	if p.TriggerPrice == "" {
-		return nil, fmt.Errorf("triggerPrice must not be empty")
+	if policy.TriggerPrice == nil {
+		return nil, fmt.Errorf("payload is a trailing-stop policy")
 	}
-	trigger, ok := new(big.Int).SetString(p.TriggerPrice, 10)
-	if !ok {
-		return nil, fmt.Errorf("triggerPrice %q is not a base-10 integer", p.TriggerPrice)
-	}
-	if trigger.Sign() <= 0 {
-		return nil, fmt.Errorf("triggerPrice must be positive, got %s", trigger)
-	}
-	return trigger, nil
+	return policy.TriggerPrice, nil
 }

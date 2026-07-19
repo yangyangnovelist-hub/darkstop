@@ -18,7 +18,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { ctr } from "@noble/ciphers/aes.js";
 import { hexToBytes, bytesToHex } from "@noble/hashes/utils.js";
-import { concatKDF, deriveKeys, eciesEncrypt, encryptTriggerPrice } from "./ecies";
+import { concatKDF, deriveKeys, eciesEncrypt, encryptTrailingStop, encryptTriggerPrice, POLICY_PLAINTEXT_BYTES } from "./ecies";
 
 const fixture: {
   privateKeyHex: string;
@@ -125,16 +125,39 @@ describe("encryptTriggerPrice", () => {
   it("produces placeOrder-ready hex the TEE key can decrypt to canonical JSON", () => {
     const hex = encryptTriggerPrice(fixture.publicKeyHex, "20000");
     expect(hex).toMatch(/^0x04[0-9a-f]+$/);
-    const plaintext = new TextDecoder().decode(
-      eciesDecrypt(priv, hexToBytes(hex.slice(2))),
+    const plaintext = eciesDecrypt(priv, hexToBytes(hex.slice(2)));
+    expect(plaintext).toHaveLength(POLICY_PLAINTEXT_BYTES);
+    expect(new TextDecoder().decode(plaintext).trimEnd()).toBe(
+      '{"strategy":"fixed","triggerPrice":"20000"}',
     );
-    expect(plaintext).toBe('{"triggerPrice":"20000"}');
-    expect(plaintext).toBe(fixture.plaintext);
   });
 
   it("rejects non-integer or non-positive trigger prices", () => {
-    for (const bad of ["0", "-5", "1.5", "abc", "", "007"]) {
+    for (const bad of ["0", "-5", "1.5", "abc", "", "007", (1n << 256n).toString()]) {
       expect(() => encryptTriggerPrice(fixture.publicKeyHex, bad)).toThrow();
     }
+  });
+});
+
+describe("encryptTrailingStop", () => {
+  it("encrypts the exact tagged private trailing policy", () => {
+    const hex = encryptTrailingStop(fixture.publicKeyHex, 500);
+    expect(hex).toMatch(/^0x04/);
+    const plaintext = eciesDecrypt(priv, hexToBytes(hex.slice(2)));
+    expect(plaintext).toHaveLength(POLICY_PLAINTEXT_BYTES);
+    expect(new TextDecoder().decode(plaintext).trimEnd()).toBe(
+      '{"strategy":"trailing","trailBps":500}',
+    );
+  });
+
+  it("rejects unsafe distances", () => {
+    expect(() => encryptTrailingStop(fixture.publicKeyHex, 1)).toThrow();
+    expect(() => encryptTrailingStop(fixture.publicKeyHex, 5001)).toThrow();
+  });
+
+  it("uses the same ciphertext length as a fixed policy", () => {
+    const trailing = encryptTrailingStop(fixture.publicKeyHex, 500);
+    const fixed = encryptTriggerPrice(fixture.publicKeyHex, "20000");
+    expect(trailing.length).toBe(fixed.length);
   });
 });

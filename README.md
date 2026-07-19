@@ -1,6 +1,6 @@
 # DarkStop — Confidential Stop-Loss Orders on Flare
 
-Stop-loss orders whose trigger prices never touch the chain. Built for the
+Private trailing stops whose moving triggers stay sealed until execution. Built for the
 Flare Summer Signal hackathon (DoraHacks), Bounty 2 — Confidential Compute
 Apps.
 
@@ -14,12 +14,14 @@ DeFi today cannot.
 
 ## The solution
 
-DarkStop keeps the trigger price ECIES-encrypted end-to-end: encrypted in the
+DarkStop keeps the trigger policy ECIES-encrypted end-to-end: encrypted in the
 browser to the TEE extension's enclave key, opaque in the on-chain calldata,
 decrypted and monitored only inside the TEE (Flare Confidential Compute). The
-chain learns the trigger only at settlement. Even then, the contract does
-not trust the TEE alone: `settle()` re-reads the live FTSO FLR/USD feed and
-requires a fresh price at-or-below the revealed trigger before paying out.
+chain learns the effective trigger only at settlement. At that point,
+`settle()` does not trust the TEE's price observation: it re-reads the live
+FTSO FLR/USD feed and requires a fresh price at-or-below the revealed trigger
+before paying out. The authorized TEE remains responsible for enforcing the
+encrypted policy itself.
 
 ## Architecture
 
@@ -48,20 +50,21 @@ flowchart LR
     G -->|USDT0 payout| I[Order owner]
 ```
 
-Data flow: the browser encrypts `{triggerPrice}` to the enclave public key and
+Data flow: the browser encrypts a tagged `{strategy, triggerPrice}` or `{strategy, trailBps}` policy to the enclave public key and
 calls `placeOrder(ciphertext)` with a native-token deposit. The vault forwards
 the ciphertext through the FCC instruction flow (`sendInstructions`, OPType
 `DARKSTOP` / OPCommand `PLACE_ORDER`). The TEE extension decrypts, stores the
-order in enclave memory, and polls the FTSO FLR/USD feed. When the price
-crosses the trigger, it submits `settle(orderId, trigger, maxAge)`; the
+order in enclave memory, and polls the FTSO FLR/USD feed. Trailing orders keep
+their high-watermark and moving boundary private inside the TEE. When price
+crosses the effective trigger, it submits `settle(orderId, trigger, maxAge)`; the
 contract independently re-verifies the price against FTSO and pays the owner
 in USDT0. Explorer calldata for `placeOrder` shows only an opaque blob.
 
 ## What was built during the hackathon
 
-Everything in this repository is new work built during the hackathon, on top
-of the official [`flare-foundation/fce-extension-scaffold`](https://github.com/flare-foundation/fce-extension-scaffold)
-(the Hello World FCC extension template, credited throughout). Specifically:
+The DarkStop application was built during the hackathon on top of the official
+[`flare-foundation/fce-extension-scaffold`](https://github.com/flare-foundation/fce-extension-scaffold)
+(the Hello World FCC extension template, retained and credited). Specifically:
 
 - **`contracts/DarkStopVault.sol`** — deposit vault + FCC instruction sender.
   `placeOrder(bytes ciphertext)` stores the deposit and forwards the encrypted
@@ -71,28 +74,36 @@ of the official [`flare-foundation/fce-extension-scaffold`](https://github.com/f
   Plus `MockUSDT0.sol` as the testnet payout token.
 - **Go TEE extension** — `PLACE_ORDER` / `CANCEL_ORDER` handlers, ECIES
   decryption (go-ethereum `crypto/ecies`), an in-enclave order store, and an
-  FTSO watcher goroutine that polls FLR/USD, detects trigger crossings, and
-  submits settlement transactions with retry/backoff and per-attempt audit
-  logging.
-- **Frontend (Next.js)** — wallet connect, order form, and a from-scratch
-  browser ECIES encryptor (`frontend/lib/ecies.ts`) wire-compatible with
-  go-ethereum's `crypto/ecies` (eciesjs is not — verified and documented).
+  FTSO watcher goroutine that polls FLR/USD, maintains private trailing-stop
+  high-watermarks, detects trigger crossings, and
+  submits settlement transactions with retry/backoff, non-blocking
+  receipt/vault reconciliation, same-nonce fee bumps for stuck transactions,
+  and per-attempt audit logging.
+- **Frontend (Next.js)** — wallet connect, fixed or private trailing-stop order
+  form, public-versus-sealed observer comparison, and a browser ECIES adapter
+  (`frontend/lib/ecies.ts`) assembled from audited Noble
+  cryptographic primitives and wire-compatible with go-ethereum's
+  `crypto/ecies` (eciesjs is not — verified and documented). Fixed-length
+  padded plaintext also prevents ciphertext size from revealing policy type.
   JS-encrypt → Go-decrypt interop is proven by a conformance suite against a
   Go-produced test vector. Live order table flips Pending → Executed from
   chain events.
 - **Tooling** — Coston2 deployment pipeline, a one-command local proof
   (`scripts/demo-e2e.sh`) that exercises the real Go decrypt/store/watcher
-  path, fork tests against the real Coston2 FTSO, and a bring-up runbook for
-  the Coston2 TEE proxy.
+  path plus negative settlement guardrails, fork tests against the real
+  Coston2 FTSO, and a bring-up runbook for the Coston2 TEE proxy.
 
 ## Flare integration
 
-**FCC (Flare Confidential Compute) — full lifecycle.** The vault is a real
-FCC instruction sender: extension registered on `TeeExtensionRegistry`
+**FCC (Flare Confidential Compute) — complete application path.** The vault is
+a real FCC instruction sender: extension registered on `TeeExtensionRegistry`
 (extension id 503), instruction fee paid through `sendInstructions`, OPType /
 OPCommand constants mirrored byte-for-byte across Solidity, Go config, and
-decoder registration, and the TEE machine registered on-chain. The product is
-impossible as a plain smart contract. The confidentiality comes from the TEE.
+decoder registration, and the TEE machine registered on-chain. The full
+instruction loop runs on the local simulated FCC stack; Coston2 artifacts and
+the current availability limitation are separated below. The product is
+impossible as a plain smart contract because its pre-execution policy state
+must remain confidential.
 
 **FTSO — used in two places.**
 
@@ -111,7 +122,7 @@ require(block.timestamp - timestamp <= _maxAgeSec, "stale price");
 require(price <= _triggerPrice, "price above trigger");
 ```
 
-## Live deployment (Coston2, chain id 114)
+## Coston2 deployed artifacts (chain id 114)
 
 | Item | Address |
 |---|---|
@@ -143,11 +154,18 @@ Stated plainly, because judges should not have to dig for this:
   place → trigger → settle loop on a local dev stack, and the settlement path
   against the *real* Coston2 FTSO via fork tests
   ([`docs/coston2-runbook.md`](docs/coston2-runbook.md) has the full account).
+- The repository's trailing-policy runtime is version `0.2.0`; the existing
+  Coston2 machine registration predates this upgrade. Deployment tooling now
+  registers `v0.2.0` with its new code hash rather than reusing `v0.1.0`.
 - The trigger price is revealed at settlement. That is the product's contract:
   pre-execution secrecy is what prevents stop hunting; post-execution reveal
   is inherent to on-chain verification.
-- Testnet scope: one pair (FLR/USD), one order type (stop-loss sell), payout
-  from a pre-funded mock-USDT0 pool instead of a DEX hop.
+- The vault verifies executor authority, FTSO freshness, and current price; it
+  does not cryptographically bind the revealed trigger back to the ciphertext.
+  Policy integrity therefore relies on the authorized TEE in this prototype.
+- Testnet scope: one pair (FLR/USD), fixed and trailing strategy settlement,
+  and a pre-funded mock-USDT0 payout while the native deposit remains in the
+  vault. This is a settlement proof, not a DEX sale.
 
 ## Run it yourself
 
@@ -158,8 +176,9 @@ Stated plainly, because judges should not have to dig for this:
 ```
 
 The script encrypts and places an order, delivers the official FCC action shape
-to the Go extension, proves the enclave stored it, changes only the mock FTSO
-price, and waits for the real watcher to submit and confirm `settle()`. To watch
+to the Go extension, proves the enclave stored it, shows that both an outsider
+and a premature executor call are rejected, changes only the mock FTSO price,
+and waits for the real watcher to submit and confirm `settle()`. To watch
 the same state transition in the UI, start `cd frontend && npm run dev` after
 `scripts/dev-stack.sh`. Step-by-step walkthrough: [`frontend/README.md`](frontend/README.md).
 
@@ -168,14 +187,15 @@ the same state transition in the UI, start `cd frontend && npm run dev` after
 
 ## Test evidence
 
-114 tests across the three layers:
+113 DarkStop-specific test checks, with inherited scaffold tooling reported separately:
 
 | Suite | Count | Command |
 |---|---|---|
 | Vault unit tests (mocked FTSO/registries) | 21 | `forge test` |
 | Coston2 fork tests (real FtsoV2, live feed) | 4 | `forge test --match-contract DarkStopVaultForkTest --fork-url https://coston2-api.flare.network/ext/C/rpc` |
-| Go extension (decoders, ECIES, store, handlers, watcher) | 78 | `go test ./...` |
-| Frontend ECIES conformance (JS encrypt ↔ Go vector) | 11 | `cd frontend && npm test` |
+| Go extension runtime (decoders, ECIES, store, handlers, watcher) | 63 | `go test ./...` |
+| Frontend crypto conformance + exact strategy parsing | 25 | `cd frontend && npm test` |
+| Inherited scaffold deployment / validation tooling | 85 | `cd tools && go test ./...` |
 
 The fork suite self-skips when not on a Coston2 fork, so plain `forge test`
 is always safe. The fork tests place and settle an order against the live
@@ -188,6 +208,6 @@ FTSO re-check works on the real network.
    replaces simulated mode with hardware attestation.
 2. **Coston2 live `placeOrder`** as soon as the Flare FTDC proxy produces the
    availability proof for our registered machine (all our-side steps done).
-3. Multiple pairs and take-profit / trailing orders.
+3. Multiple pairs and encrypted OCO take-profit orders.
 4. Real DEX settlement hop instead of the pre-funded payout pool.
 5. Enclave state recovery by replaying `OrderPlaced` events after restart.

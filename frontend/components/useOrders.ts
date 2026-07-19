@@ -15,12 +15,15 @@ export type OrderRow = {
   placedTx?: string;
   /** Tx that executed or cancelled the order. */
   finalTx?: string;
+  /** Block containing the execution or cancellation receipt. */
+  finalBlock?: bigint;
 };
 
 type VaultLog = {
   eventName: "OrderPlaced" | "OrderExecuted" | "OrderCancelled";
   args: { orderId?: bigint; owner?: `0x${string}`; price?: bigint };
   transactionHash: `0x${string}` | null;
+  blockNumber: bigint | null;
 };
 
 /** Live order book derived purely from vault events: history via getLogs,
@@ -47,10 +50,12 @@ export function useOrders() {
             row.status = "Executed";
             row.price = log.args.price;
             row.finalTx = log.transactionHash ?? row.finalTx;
+            row.finalBlock = log.blockNumber ?? row.finalBlock;
             break;
           case "OrderCancelled":
             row.status = "Cancelled";
             row.finalTx = log.transactionHash ?? row.finalTx;
+            row.finalBlock = log.blockNumber ?? row.finalBlock;
             break;
         }
         next.set(key, row);

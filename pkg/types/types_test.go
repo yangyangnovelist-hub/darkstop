@@ -47,8 +47,8 @@ func TestDecodePlaceOrder_RoundTrip(t *testing.T) {
 
 func TestDecodePlaceOrder_BadData(t *testing.T) {
 	for name, data := range map[string][]byte{
-		"empty":     {},
-		"truncated": {0x00, 0x01, 0x02},
+		"empty":                               {},
+		"truncated":                           {0x00, 0x01, 0x02},
 		"cancel encoding (missing bytes arg)": packCancelOrder(t, big.NewInt(7)),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -171,9 +171,10 @@ func TestRegisterDecoders_GreetingGone(t *testing.T) {
 // contain ONLY orderId and status: no price data may ever appear in state.
 func TestStateJSON_NoPriceData(t *testing.T) {
 	s := State{
-		EncryptionPubKey: "0x04abcd",
-		OpenOrders:       1,
-		Orders:           []OrderState{{OrderID: "1", Status: "open"}},
+		EncryptionPubKey:  "0x04abcd",
+		SupportedPolicies: []string{"fixed", "trailing"},
+		OpenOrders:        1,
+		Orders:            []OrderState{{OrderID: "1", Status: "open"}},
 	}
 	b, err := json.Marshal(s)
 	if err != nil {
@@ -184,7 +185,7 @@ func TestStateJSON_NoPriceData(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, key := range []string{"encryptionPubKey", "openOrders", "orders"} {
+	for _, key := range []string{"encryptionPubKey", "supportedPolicies", "openOrders", "orders"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("expected state key %q in %s", key, b)
 		}

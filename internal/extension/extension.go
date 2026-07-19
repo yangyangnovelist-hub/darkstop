@@ -77,9 +77,10 @@ func (e *Extension) stateHandler(w http.ResponseWriter, r *http.Request) {
 	stateResponse := types.StateResponse{
 		StateVersion: teeutils.ToHash(config.Version),
 		State: types.State{
-			EncryptionPubKey: e.crypto.PublicKeyHex(),
-			OpenOrders:       open,
-			Orders:           orderStates,
+			EncryptionPubKey:  e.crypto.PublicKeyHex(),
+			SupportedPolicies: e.store.SupportedPolicies(),
+			OpenOrders:        open,
+			Orders:            orderStates,
 		},
 	}
 
@@ -132,8 +133,8 @@ func (e *Extension) processDarkstop(action teetypes.Action, df *instruction.Data
 }
 
 // processPlaceOrder handles PLACE_ORDER: ABI decode → ECIES decrypt →
-// validate trigger → store in enclave memory. The result acknowledges the
-// order id and status only — the trigger price stays inside the TEE.
+// validate policy → store in enclave memory. The result acknowledges the
+// order id and status only — private policy state stays inside the TEE.
 func (e *Extension) processPlaceOrder(action teetypes.Action, df *instruction.DataFixed) teetypes.ActionResult {
 	req, err := types.DecodePlaceOrder(df.OriginalMessage)
 	if err != nil {
@@ -150,18 +151,18 @@ func (e *Extension) processPlaceOrder(action teetypes.Action, df *instruction.Da
 		return buildResult(action, df, nil, 0, fmt.Errorf("decrypting ciphertext: %w", err))
 	}
 
-	trigger, err := ParseTriggerPlaintext(plaintext)
+	policy, err := ParseOrderPlaintext(plaintext)
 	if err != nil {
-		return buildResult(action, df, nil, 0, fmt.Errorf("validating trigger: %w", err))
+		return buildResult(action, df, nil, 0, fmt.Errorf("validating order policy: %w", err))
 	}
 
-	if err := e.store.Put(Order{ID: id, TriggerPrice: trigger, Status: StatusOpen}); err != nil {
+	if err := e.store.Put(Order{ID: id, TriggerPrice: policy.TriggerPrice, TrailBps: policy.TrailBps, Status: StatusOpen}); err != nil {
 		return buildResult(action, df, nil, 0, fmt.Errorf("storing order: %w", err))
 	}
 
 	// Deliberately no trigger value in this log line: the audit trail must
 	// stay price-free until settlement reveals the trigger on-chain.
-	logger.Infof("order %d placed: trigger decrypted and held in enclave memory", id)
+	logger.Infof("order %d placed: policy decrypted and held in enclave memory", id)
 
 	data, _ := json.Marshal(types.OrderResponse{
 		OrderID: strconv.FormatUint(id, 10),

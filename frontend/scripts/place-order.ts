@@ -17,7 +17,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { readFileSync } from "node:fs";
-import { encryptTriggerPrice } from "../lib/ecies";
+import { encryptTrailingStop, encryptTriggerPrice } from "../lib/ecies";
 import { vaultAbi } from "../lib/vault";
 
 const env = Object.fromEntries(
@@ -36,6 +36,8 @@ const ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f
 
 const DEPOSIT = parseEther("1");          // 1 FLR to protect
 const TRIGGER_6DEC = "20000";             // 0.02 USD/FLR × 1e6
+const ORDER_MODE = process.env.ORDER_MODE ?? "trailing";
+const TRAIL_BPS = 500;                     // 5% private trailing distance
 
 async function main() {
   const account = privateKeyToAccount(ANVIL_KEY);
@@ -50,9 +52,18 @@ async function main() {
   const stateBody = await stateRes.json();
   const teePubkey = stateBody?.state?.encryptionPubKey;
   if (!teePubkey) throw new Error("TEE state has no encryptionPubKey");
+  const supported = stateBody?.state?.supportedPolicies;
+  if (!Array.isArray(supported) || !supported.includes(ORDER_MODE)) {
+    throw new Error(`TEE is not ready for ${ORDER_MODE} orders`);
+  }
 
-  const ciphertext = encryptTriggerPrice(teePubkey, TRIGGER_6DEC);
-  console.log(`Encrypted trigger $0.02 → ${ciphertext.slice(0, 42)}… (${(ciphertext.length - 2) / 2} bytes)`);
+  const ciphertext = ORDER_MODE === "fixed"
+    ? encryptTriggerPrice(teePubkey, TRIGGER_6DEC)
+    : encryptTrailingStop(teePubkey, TRAIL_BPS);
+  const policyLabel = ORDER_MODE === "fixed"
+    ? "fixed trigger $0.02"
+    : "5% trailing policy (high-watermark and trigger stay private)";
+  console.log(`Encrypted ${policyLabel} → ${ciphertext.slice(0, 42)}… (${(ciphertext.length - 2) / 2} bytes)`);
 
   const hash = await wallet.writeContract({
     address: VAULT, abi: vaultAbi, functionName: "placeOrder",

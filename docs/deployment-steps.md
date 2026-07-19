@@ -89,8 +89,8 @@ Then build:
 ```powershell
 $env:SOURCE_DATE_EPOCH = (git log -1 --format=%ct)
 docker compose -f docker-compose.yaml build --no-cache extension-tee
-docker tag <your-extension>-extension-tee:latest <your-extension>:v0.1.0
-docker save <your-extension>:v0.1.0 -o <your-extension>-v0.1.0.tar
+docker tag <your-extension>-extension-tee:latest <your-extension>:v0.2.0
+docker save <your-extension>:v0.2.0 -o <your-extension>-v0.2.0.tar
 ```
 
 Setting `SOURCE_DATE_EPOCH` makes the build reproducible (same source → same `codeHash`).
@@ -98,7 +98,7 @@ Setting `SOURCE_DATE_EPOCH` makes the build reproducible (same source → same `
 Verify `MODE=0` is baked into the image:
 
 ```powershell
-docker inspect <your-extension>:v0.1.0 --format '{{range .Config.Env}}{{println .}}{{end}}' | Select-String MODE
+docker inspect <your-extension>:v0.2.0 --format '{{range .Config.Env}}{{println .}}{{end}}' | Select-String MODE
 # expected: MODE=0
 ```
 

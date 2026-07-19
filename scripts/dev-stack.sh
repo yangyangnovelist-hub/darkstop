@@ -95,12 +95,14 @@ nohup env \
 echo $! >"$EXTENSION_PIDFILE"
 
 for _ in $(seq 1 50); do
-  state_key="$(curl -fsS http://127.0.0.1:7702/state 2>/dev/null | jq -r '.state.encryptionPubKey // empty' || true)"
-  [[ "$state_key" == "$FIXTURE_PUBKEY" ]] && break
+  state_json="$(curl -fsS http://127.0.0.1:7702/state 2>/dev/null || true)"
+  state_key="$(jq -r '.state.encryptionPubKey // empty' <<<"$state_json" 2>/dev/null || true)"
+  trailing_ready="$(jq -r '.state.supportedPolicies | index("trailing") != null' <<<"$state_json" 2>/dev/null || true)"
+  [[ "$state_key" == "$FIXTURE_PUBKEY" && "$trailing_ready" == "true" ]] && break
   sleep 0.2
 done
-[[ "${state_key:-}" == "$FIXTURE_PUBKEY" ]] || {
-  echo "extension did not start with the expected enclave key; see $EXTENSION_LOG" >&2
+[[ "${state_key:-}" == "$FIXTURE_PUBKEY" && "${trailing_ready:-}" == "true" ]] || {
+  echo "extension did not start with the expected key and fresh trailing capability; see $EXTENSION_LOG" >&2
   exit 1
 }
 
@@ -113,6 +115,7 @@ NEXT_PUBLIC_CHAIN_ID=$CHAIN_ID
 NEXT_PUBLIC_RPC_URL=$RPC_URL
 NEXT_PUBLIC_EXPLORER_URL=
 NEXT_PUBLIC_VAULT_ADDRESS=$VAULT
+NEXT_PUBLIC_ORDERING_ENABLED=true
 TEE_STATE_URL=http://127.0.0.1:7702/state
 TEE_ACTION_URL=http://127.0.0.1:7702/action
 DEV_FTSO_ADDRESS=$FTSO

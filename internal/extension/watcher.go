@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"extension-scaffold/internal/config"
@@ -29,6 +30,7 @@ type ChainClient interface {
 	EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
 	SendTransaction(ctx context.Context, tx *ethtypes.Transaction) error
 	TransactionReceipt(ctx context.Context, txHash common.Hash) (*ethtypes.Receipt, error)
+	TransactionByHash(ctx context.Context, txHash common.Hash) (*ethtypes.Transaction, bool, error)
 	ChainID(ctx context.Context) (*big.Int, error)
 }
 
@@ -41,10 +43,11 @@ const (
 	payoutDecimals = 6
 	// settleAttempts is the number of send tries per triggered order per tick.
 	settleAttempts = 3
-	// receiptPolls / receiptPollDelay bound how long a sent settle tx is
-	// awaited before the attempt is written off.
-	receiptPolls     = 30
-	receiptPollDelay = 2 * time.Second
+	// This many consecutive receipt + transaction lookup misses classify a
+	// broadcast as dropped. A known mempool transaction is fee-bumped after
+	// pendingReplacementAge so it cannot block an order forever.
+	pendingDropChecks     = 3
+	pendingReplacementAge = 30 * time.Second
 )
 
 // flrUsdFeedID is the FTSO v2 FLR/USD feed id (bytes21, matches vault const).
@@ -56,6 +59,7 @@ var flrUsdFeedID = [21]byte{0x01, 'F', 'L', 'R', '/', 'U', 'S', 'D'}
 var watcherABI = func() abi.ABI {
 	const abiJSON = `[
 		{"name":"FTSO_V2","type":"function","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"address"}]},
+		{"name":"orders","type":"function","stateMutability":"view","inputs":[{"name":"","type":"uint256"}],"outputs":[{"name":"owner","type":"address"},{"name":"deposit","type":"uint256"},{"name":"status","type":"uint8"}]},
 		{"name":"settle","type":"function","stateMutability":"nonpayable","inputs":[{"name":"_orderId","type":"uint256"},{"name":"_triggerPrice","type":"uint256"},{"name":"_maxAgeSec","type":"uint256"}],"outputs":[]},
 		{"name":"getFeedById","type":"function","stateMutability":"view","inputs":[{"name":"_feedId","type":"bytes21"}],"outputs":[{"name":"","type":"uint256"},{"name":"","type":"int8"},{"name":"","type":"uint64"}]}
 	]`
@@ -83,6 +87,27 @@ type Watcher struct {
 	// lazily resolved / cached chain facts.
 	ftso    common.Address
 	chainID *big.Int
+
+	// pending tracks every broadcast until chain state is reconciled. Receipt
+	// checks are non-blocking, so price sampling never pauses behind mining.
+	pending map[uint64]pendingSettlement
+
+	// tickMu serializes all watcher state. nonceOwners prevents two orders
+	// from receiving the same executor nonce when an RPC's pending nonce lags
+	// behind broadcasts made earlier in the same tick.
+	tickMu      sync.Mutex
+	nonceOwners map[uint64]uint64 // nonce -> order ID
+	nextNonce   uint64
+	nonceReady  bool
+}
+
+type pendingSettlement struct {
+	txHash        common.Hash
+	nonce         uint64
+	gasPrice      *big.Int
+	triggerPrice  *big.Int
+	firstSeen     time.Time
+	missingChecks int
 }
 
 // NewWatcher builds a watcher settling via the given executor key
@@ -93,13 +118,15 @@ func NewWatcher(client ChainClient, store *Store, vault common.Address, executor
 		return nil, fmt.Errorf("parsing executor private key: %w", err)
 	}
 	return &Watcher{
-		client:   client,
-		store:    store,
-		vault:    vault,
-		key:      key,
-		from:     ethcrypto.PubkeyToAddress(key.PublicKey),
-		interval: interval,
-		sleep:    time.Sleep,
+		client:      client,
+		store:       store,
+		vault:       vault,
+		key:         key,
+		from:        ethcrypto.PubkeyToAddress(key.PublicKey),
+		interval:    interval,
+		sleep:       time.Sleep,
+		pending:     make(map[uint64]pendingSettlement),
+		nonceOwners: make(map[uint64]uint64),
 	}, nil
 }
 
@@ -124,32 +151,242 @@ func (w *Watcher) Run(ctx context.Context) {
 // tick reads the FTSO price once and settles every open order whose trigger
 // is at or above the current price.
 func (w *Watcher) tick(ctx context.Context) error {
+	w.tickMu.Lock()
+	defer w.tickMu.Unlock()
+
 	price, ts, err := w.currentPrice(ctx)
 	if err != nil {
+		w.reconcilePending(ctx, nil)
 		return fmt.Errorf("reading FTSO price: %w", err)
 	}
 
 	age := time.Now().Unix() - int64(ts) // #nosec G115 -- feed timestamps fit int64 for eons
+	if age < 0 {
+		w.reconcilePending(ctx, nil)
+		return fmt.Errorf("FTSO feed timestamp is %ds in the future", -age)
+	}
 	if age > settleMaxAgeSec {
+		w.reconcilePending(ctx, nil)
 		return fmt.Errorf("FTSO feed is stale: %ds old (max %ds)", age, settleMaxAgeSec)
 	}
 
 	open := w.store.OpenOrders()
 	logger.Infof("watcher: FLR/USD = %s (6dp, feed age %ds), %d open order(s)", price, age, len(open))
+	w.store.ObservePrice(price, time.Unix(int64(ts), 0)) // #nosec G115 -- validated above
+	triggered := w.store.TriggeredOrders(price)
 
-	for _, order := range open {
-		if price.Cmp(order.TriggerPrice) > 0 {
-			continue // price still above trigger
+	// Sample and update every private high-watermark before receipt RPC work.
+	// This keeps trailing semantics responsive even with many pending txs.
+	w.reconcilePending(ctx, price)
+
+	for _, order := range triggered {
+		// One executor transaction at a time prevents nonce gaps. Ethereum
+		// cannot mine nonce n+1 while n is absent; serial submission makes a
+		// dropped inactive order unable to strand later settlements.
+		if len(w.pending) > 0 {
+			break
+		}
+		current, exists := w.store.Get(order.ID)
+		if !exists || current.Status != StatusOpen {
+			continue
 		}
 		logger.Infof("watcher: order %d TRIGGERED (price %s <= trigger %s) — settling", order.ID, price, order.TriggerPrice)
-		if w.settleWithRetry(ctx, order) {
-			w.store.MarkExecuted(order.ID)
-			logger.Infof("watcher: order %d marked executed", order.ID)
-		} else {
+		settled, pending := w.settleWithRetry(ctx, order)
+		if settled {
+			if w.store.MarkExecuted(order.ID) {
+				logger.Infof("watcher: order %d marked executed", order.ID)
+			} else {
+				logger.Warnf("watcher: order %d confirmed but local state was no longer open", order.ID)
+			}
+		} else if !pending {
 			logger.Warnf("watcher: order %d settle failed after %d attempts, will retry next tick", order.ID, settleAttempts)
 		}
 	}
 	return nil
+}
+
+type unconfirmedTxState uint8
+
+const (
+	txStuck unconfirmedTxState = iota
+	txDropped
+	txMinedNoReceipt
+)
+
+// reconcilePending performs one non-blocking receipt lookup per broadcast. A
+// successful receipt repairs local state; a reverted receipt releases the
+// order; a stale mempool transaction is safely fee-bumped with the same nonce.
+// sampledPrice is nil when the tick has no fresh FTSO sample; replacement is
+// then deferred because the watcher cannot prove the order is still active.
+func (w *Watcher) reconcilePending(ctx context.Context, sampledPrice *big.Int) {
+	for orderID, pending := range w.pending {
+		receipt, err := w.client.TransactionReceipt(ctx, pending.txHash)
+		if errors.Is(err, ethereum.NotFound) {
+			w.reconcileUnconfirmed(ctx, orderID, pending, sampledPrice)
+			continue
+		}
+		if err != nil {
+			logger.Warnf("watcher: order %d pending tx %s receipt check failed: %v", orderID, pending.txHash, err)
+			continue
+		}
+
+		delete(w.pending, orderID)
+		w.releaseNonce(orderID, pending.nonce, true)
+		if receipt.Status == ethtypes.ReceiptStatusSuccessful {
+			if w.store.MarkExecuted(orderID) {
+				logger.Infof("watcher: order %d pending tx %s confirmed — local state reconciled", orderID, pending.txHash)
+			} else {
+				logger.Warnf("watcher: order %d pending tx %s confirmed but local state was no longer open", orderID, pending.txHash)
+			}
+			continue
+		}
+		logger.Warnf("watcher: order %d pending tx %s reverted — releasing for retry", orderID, pending.txHash)
+	}
+}
+
+func (w *Watcher) reconcileUnconfirmed(ctx context.Context, orderID uint64, pending pendingSettlement, sampledPrice *big.Int) {
+	_, isPending, err := w.client.TransactionByHash(ctx, pending.txHash)
+	if err == nil {
+		if isPending {
+			pending.missingChecks = 0
+			w.pending[orderID] = pending
+			if time.Since(pending.firstSeen) < pendingReplacementAge {
+				return
+			}
+			w.reconcileAgainstVault(ctx, orderID, pending, sampledPrice, txStuck, "stuck in mempool")
+			return
+		}
+		// The nonce is already consumed. A lagging receipt must never cause a
+		// same-nonce replacement; canonical vault state decides local repair.
+		w.reconcileAgainstVault(ctx, orderID, pending, sampledPrice, txMinedNoReceipt, "mined without receipt")
+		return
+	}
+	if err != nil && !errors.Is(err, ethereum.NotFound) {
+		logger.Warnf("watcher: order %d pending tx %s lookup failed: %v", orderID, pending.txHash, err)
+		return
+	}
+
+	pending.missingChecks++
+	w.pending[orderID] = pending
+	if pending.missingChecks < pendingDropChecks {
+		return
+	}
+	w.reconcileAgainstVault(ctx, orderID, pending, sampledPrice, txDropped, "dropped from mempool")
+}
+
+func (w *Watcher) reconcileAgainstVault(
+	ctx context.Context,
+	orderID uint64,
+	pending pendingSettlement,
+	sampledPrice *big.Int,
+	txState unconfirmedTxState,
+	reason string,
+) {
+	status, err := w.onChainOrderStatus(ctx, orderID)
+	if err != nil {
+		logger.Warnf("watcher: order %d could not reconcile tx %s against vault: %v", orderID, pending.txHash, err)
+		return
+	}
+	switch status {
+	case 2: // DarkStopVault.STATUS_EXECUTED
+		delete(w.pending, orderID)
+		w.releaseNonce(orderID, pending.nonce, txState == txMinedNoReceipt)
+		if w.store.MarkExecuted(orderID) {
+			logger.Infof("watcher: order %d is executed on-chain — local state reconciled without receipt", orderID)
+		}
+	case 1: // DarkStopVault.STATUS_OPEN
+		if txState == txMinedNoReceipt {
+			delete(w.pending, orderID)
+			w.releaseNonce(orderID, pending.nonce, true)
+			logger.Warnf("watcher: order %d tx %s was mined without execution — releasing consumed nonce for a fresh settlement", orderID, pending.txHash)
+			return
+		}
+
+		currentTrigger, triggerOK := w.store.EffectiveTrigger(orderID)
+		active := sampledPrice != nil && triggerOK && sampledPrice.Cmp(currentTrigger) <= 0
+		if !active {
+			if txState == txDropped && sampledPrice != nil {
+				delete(w.pending, orderID)
+				w.releaseNonce(orderID, pending.nonce, false)
+				logger.Infof("watcher: order %d tx %s dropped while policy is not currently triggered — waiting for a fresh crossing", orderID, pending.txHash)
+			}
+			return
+		}
+		if err := w.replacePending(ctx, orderID, pending, currentTrigger); err != nil {
+			logger.Warnf("watcher: order %d tx %s %s; fee-bump failed: %v", orderID, pending.txHash, reason, err)
+		}
+	case 0, 3: // unknown or cancelled
+		delete(w.pending, orderID)
+		w.releaseNonce(orderID, pending.nonce, txState == txMinedNoReceipt)
+		w.store.Delete(orderID)
+		logger.Warnf("watcher: order %d is no longer open on-chain (status %d) — removed locally", orderID, status)
+	default:
+		logger.Warnf("watcher: order %d has unknown on-chain status %d; retaining pending tx", orderID, status)
+	}
+}
+
+func (w *Watcher) replacePending(ctx context.Context, orderID uint64, pending pendingSettlement, currentTrigger *big.Int) error {
+	if owner, ok := w.nonceOwners[pending.nonce]; ok && owner != orderID {
+		return fmt.Errorf("nonce %d is owned by order %d", pending.nonce, owner)
+	}
+	w.nonceOwners[pending.nonce] = orderID
+	data, err := packSettleCalldata(orderID, currentTrigger, settleMaxAgeSec)
+	if err != nil {
+		return fmt.Errorf("packing replacement calldata: %w", err)
+	}
+	suggested, err := w.client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("fetching replacement gas price: %w", err)
+	}
+	bumped := new(big.Int).Mul(pending.gasPrice, big.NewInt(9))
+	bumped.Div(bumped, big.NewInt(8))
+	bumped.Add(bumped, big.NewInt(1))
+	if suggested.Cmp(bumped) > 0 {
+		bumped = new(big.Int).Set(suggested)
+	}
+	gas, err := w.client.EstimateGas(ctx, ethereum.CallMsg{From: w.from, To: &w.vault, Data: data})
+	if err != nil {
+		return fmt.Errorf("estimating replacement gas: %w", err)
+	}
+	if err := w.ensureChainID(ctx); err != nil {
+		return err
+	}
+	tx := ethtypes.NewTransaction(pending.nonce, w.vault, big.NewInt(0), gas, bumped, data)
+	signed, err := ethtypes.SignTx(tx, ethtypes.LatestSignerForChainID(w.chainID), w.key)
+	if err != nil {
+		return fmt.Errorf("signing replacement tx: %w", err)
+	}
+	if err := w.client.SendTransaction(ctx, signed); err != nil {
+		return fmt.Errorf("sending replacement tx: %w", err)
+	}
+	pending.txHash = signed.Hash()
+	pending.gasPrice = new(big.Int).Set(bumped)
+	pending.triggerPrice = new(big.Int).Set(currentTrigger)
+	pending.firstSeen = time.Now()
+	pending.missingChecks = 0
+	w.pending[orderID] = pending
+	logger.Infof("watcher: order %d settlement fee-bumped: %s (nonce %d, gasPrice %s)", orderID, signed.Hash(), pending.nonce, bumped)
+	return nil
+}
+
+func (w *Watcher) onChainOrderStatus(ctx context.Context, orderID uint64) (uint8, error) {
+	input, err := watcherABI.Pack("orders", new(big.Int).SetUint64(orderID))
+	if err != nil {
+		return 0, fmt.Errorf("packing orders lookup: %w", err)
+	}
+	output, err := w.client.CallContract(ctx, ethereum.CallMsg{To: &w.vault, Data: input}, nil)
+	if err != nil {
+		return 0, fmt.Errorf("calling orders lookup: %w", err)
+	}
+	values, err := watcherABI.Unpack("orders", output)
+	if err != nil {
+		return 0, fmt.Errorf("unpacking orders lookup: %w", err)
+	}
+	status, ok := values[2].(uint8)
+	if !ok {
+		return 0, fmt.Errorf("order status: expected uint8, got %T", values[2])
+	}
+	return status, nil
 }
 
 // currentPrice returns the FLR/USD price normalized to 6 decimals plus the
@@ -235,16 +472,85 @@ func packSettleCalldata(orderID uint64, triggerPrice *big.Int, maxAgeSec uint64)
 	)
 }
 
+// reserveNonce gives an order exclusive ownership of one executor nonce.
+// The local floor advances after each reservation so multiple broadcasts in
+// one tick remain unique even when PendingNonceAt is served by a lagging RPC.
+// A retry for the same order deliberately reuses its reservation.
+func (w *Watcher) reserveNonce(ctx context.Context, orderID uint64) (uint64, error) {
+	for nonce, owner := range w.nonceOwners {
+		if owner == orderID {
+			return nonce, nil
+		}
+	}
+
+	remote, err := w.client.PendingNonceAt(ctx, w.from)
+	if err != nil {
+		return 0, fmt.Errorf("fetching nonce: %w", err)
+	}
+	candidate := remote
+	if w.nonceReady && w.nextNonce > candidate {
+		candidate = w.nextNonce
+	}
+	for {
+		if _, occupied := w.nonceOwners[candidate]; !occupied {
+			break
+		}
+		if candidate == ^uint64(0) {
+			return 0, fmt.Errorf("executor nonce space exhausted")
+		}
+		candidate++
+	}
+	if candidate == ^uint64(0) {
+		return 0, fmt.Errorf("executor nonce space exhausted")
+	}
+	w.nonceOwners[candidate] = orderID
+	w.nextNonce = candidate + 1
+	w.nonceReady = true
+	return candidate, nil
+}
+
+// releaseNonce clears ownership after a terminal chain result. A transaction
+// proven mined consumed its nonce. A transaction proven dropped did not, so
+// the local floor may safely return to that gap while ownership checks still
+// protect every other in-flight order.
+func (w *Watcher) releaseNonce(orderID, nonce uint64, consumed bool) {
+	owner, ok := w.nonceOwners[nonce]
+	if !ok || owner != orderID {
+		return
+	}
+	delete(w.nonceOwners, nonce)
+	if !consumed && (!w.nonceReady || nonce < w.nextNonce) {
+		w.nextNonce = nonce
+		w.nonceReady = true
+	}
+}
+
+func (w *Watcher) releaseOrderNonce(orderID uint64, consumed bool) {
+	for nonce, owner := range w.nonceOwners {
+		if owner == orderID {
+			w.releaseNonce(orderID, nonce, consumed)
+			return
+		}
+	}
+}
+
 // settleWithRetry tries to settle one order up to settleAttempts times with
-// exponential backoff. Returns true once a successful receipt is observed.
+// exponential backoff. It returns whether settlement was confirmed and
+// whether a broadcast transaction is still awaiting its receipt.
 // This reveals the trigger price on-chain — by design: settlement is the
 // moment of disclosure, and the vault re-verifies it against the live FTSO.
-func (w *Watcher) settleWithRetry(ctx context.Context, order Order) bool {
+func (w *Watcher) settleWithRetry(ctx context.Context, order Order) (bool, bool) {
 	for attempt := 1; attempt <= settleAttempts; attempt++ {
 		logger.Infof("watcher: order %d settle attempt %d/%d", order.ID, attempt, settleAttempts)
 		err := w.settleOnce(ctx, order)
 		if err == nil {
-			return true
+			return true, false
+		}
+		var unresolved *pendingTransactionError
+		if errors.As(err, &unresolved) {
+			w.pending[order.ID] = unresolved.pending
+			logger.Infof("watcher: order %d tx %s has an unresolved broadcast/receipt — reconciling on later ticks", order.ID, unresolved.pending.txHash)
+			return false, true
 		}
 		logger.Warnf("watcher: order %d settle attempt %d failed: %v", order.ID, attempt, err)
 		if attempt < settleAttempts {
@@ -253,29 +559,34 @@ func (w *Watcher) settleWithRetry(ctx context.Context, order Order) bool {
 			w.sleep(backoff)
 		}
 	}
-	return false
+	w.releaseOrderNonce(order.ID, false)
+	return false, false
 }
 
-// settleOnce builds, signs, sends one settle transaction and waits for its
-// receipt.
+type pendingTransactionError struct {
+	pending pendingSettlement
+	err     error
+}
+
+func (e *pendingTransactionError) Error() string {
+	return fmt.Sprintf("transaction %s awaits reconciliation: %v", e.pending.txHash, e.err)
+}
+
+func (e *pendingTransactionError) Unwrap() error { return e.err }
+
+// settleOnce builds, signs and sends one settle transaction. It performs at
+// most one immediate receipt lookup; mining is otherwise reconciled on later
+// ticks so the watcher can keep sampling FTSO without blocking.
 func (w *Watcher) settleOnce(ctx context.Context, order Order) error {
 	data, err := packSettleCalldata(order.ID, order.TriggerPrice, settleMaxAgeSec)
 	if err != nil {
 		return fmt.Errorf("packing settle calldata: %w", err)
 	}
 
-	if w.chainID == nil {
-		chainID, err := w.client.ChainID(ctx)
-		if err != nil {
-			return fmt.Errorf("fetching chain id: %w", err)
-		}
-		w.chainID = chainID
+	if err := w.ensureChainID(ctx); err != nil {
+		return err
 	}
 
-	nonce, err := w.client.PendingNonceAt(ctx, w.from)
-	if err != nil {
-		return fmt.Errorf("fetching nonce: %w", err)
-	}
 	gasPrice, err := w.client.SuggestGasPrice(ctx)
 	if err != nil {
 		return fmt.Errorf("fetching gas price: %w", err)
@@ -284,27 +595,55 @@ func (w *Watcher) settleOnce(ctx context.Context, order Order) error {
 	if err != nil {
 		return fmt.Errorf("estimating gas: %w", err)
 	}
+	nonce, err := w.reserveNonce(ctx, order.ID)
+	if err != nil {
+		return err
+	}
 
 	tx := ethtypes.NewTransaction(nonce, w.vault, big.NewInt(0), gas, gasPrice, data)
 	signed, err := ethtypes.SignTx(tx, ethtypes.LatestSignerForChainID(w.chainID), w.key)
 	if err != nil {
+		w.releaseNonce(order.ID, nonce, false)
 		return fmt.Errorf("signing settle tx: %w", err)
 	}
 
+	pending := pendingSettlement{
+		txHash:       signed.Hash(),
+		nonce:        nonce,
+		gasPrice:     new(big.Int).Set(gasPrice),
+		triggerPrice: new(big.Int).Set(order.TriggerPrice),
+		firstSeen:    time.Now(),
+	}
 	if err := w.client.SendTransaction(ctx, signed); err != nil {
-		return fmt.Errorf("sending settle tx: %w", err)
+		// A timeout, disconnect, or "already known" response does not prove
+		// rejection. Preserve the signed hash and nonce until chain lookups
+		// establish whether it is pending, mined, or genuinely dropped.
+		return &pendingTransactionError{pending: pending, err: fmt.Errorf("broadcast result uncertain: %w", err)}
 	}
 	logger.Infof("watcher: order %d settle tx sent: %s (nonce %d, gas %d, gasPrice %s)",
 		order.ID, signed.Hash(), nonce, gas, gasPrice)
 
-	receipt, err := w.waitReceipt(ctx, signed.Hash())
+	receipt, err := w.client.TransactionReceipt(ctx, signed.Hash())
 	if err != nil {
-		return fmt.Errorf("waiting for receipt: %w", err)
+		return &pendingTransactionError{pending: pending, err: err}
 	}
+	w.releaseNonce(order.ID, nonce, true)
 	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return fmt.Errorf("settle tx %s reverted on-chain", signed.Hash())
 	}
 	logger.Infof("watcher: order %d settle confirmed in tx %s", order.ID, signed.Hash())
+	return nil
+}
+
+func (w *Watcher) ensureChainID(ctx context.Context) error {
+	if w.chainID != nil {
+		return nil
+	}
+	chainID, err := w.client.ChainID(ctx)
+	if err != nil {
+		return fmt.Errorf("fetching chain id: %w", err)
+	}
+	w.chainID = chainID
 	return nil
 }
 
@@ -329,20 +668,4 @@ func LaunchWatcherFromConfig(ctx context.Context, store *Store) (bool, error) {
 	}
 	go w.Run(ctx)
 	return true, nil
-}
-
-// waitReceipt polls for a transaction receipt until it lands or the poll
-// budget runs out.
-func (w *Watcher) waitReceipt(ctx context.Context, txHash common.Hash) (*ethtypes.Receipt, error) {
-	for i := 0; i < receiptPolls; i++ {
-		receipt, err := w.client.TransactionReceipt(ctx, txHash)
-		if err == nil {
-			return receipt, nil
-		}
-		if !errors.Is(err, ethereum.NotFound) {
-			return nil, err
-		}
-		w.sleep(receiptPollDelay)
-	}
-	return nil, fmt.Errorf("tx %s: no receipt after %d polls", txHash, receiptPolls)
 }

@@ -37,7 +37,7 @@ func main() {
 	codeHash := flag.String("codeHash", "", "0x... code hash for addTeeVersion replay")
 	platform := flag.String("platform", "", "0x... platform for addTeeVersion replay")
 	from := flag.String("from", "0xDa50A19aF65655785ab1F4c6a5b0592AFC497C88", "from address for eth_call replay")
-	version := flag.String("version", "v0.1.0", "version string for addTeeVersion replay")
+	version := flag.String("version", "v0.2.0", "version string for addTeeVersion replay")
 	flag.Parse()
 
 	addr, err := support.ParseAddresses(*af)

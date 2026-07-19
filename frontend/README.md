@@ -17,6 +17,7 @@ see `../docs/deployments.md`). Override via `.env.local`:
 | `NEXT_PUBLIC_RPC_URL` | Coston2 public RPC | Reads + event watching |
 | `NEXT_PUBLIC_EXPLORER_URL` | Coston2 explorer (empty on other chains) | Tx / calldata links |
 | `NEXT_PUBLIC_VAULT_ADDRESS` | Coston2 vault | DarkStopVault address |
+| `NEXT_PUBLIC_ORDERING_ENABLED` | `false` on Coston2; local dev stack writes `true` | Enables order submission only when the full FCC relay is healthy |
 | `NEXT_PUBLIC_START_BLOCK` | probe from genesis, fall back to recent | `getLogs` start for order history |
 | `TEE_STATE_URL` | `http://localhost:7702/state` | TEE extension `/state` (proxied server-side by `/api/tee-state`) |
 | `DEV_FALLBACK_TEE_PUBKEY` | unset | Local-dev-only pubkey used when the TEE is unreachable |

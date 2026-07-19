@@ -2,22 +2,23 @@ package main
 
 import (
 	"crypto/ecdsa"
-	"flag"
-	"os"
-	"strings"
 	"extension-scaffold/tools/pkg/configs"
 	"extension-scaffold/tools/pkg/fccutils"
 	"extension-scaffold/tools/pkg/support"
+	"flag"
+	"fmt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/flare-foundation/go-flare-common/pkg/logger"
+	"os"
+	"strings"
 )
 
 func main() {
 	af := flag.String("a", configs.AddressesFile, "file with deployed addresses")
 	cf := flag.String("c", configs.ChainNodeURL, "chain node url")
 	pf := flag.String("p", configs.ExtensionProxyURL, "proxy url")
-	versionF := flag.String("version", "v0.1.0", "version")
+	versionF := flag.String("version", "v0.2.0", "version")
 	flag.Parse()
 
 	testSupport, err := support.DefaultSupport(*af, *cf)
@@ -82,7 +83,22 @@ func main() {
 	err = fccutils.AddTeeVersion(testSupport, privKey, teeInfo.MachineData.ExtensionID.Big(), teeInfo.MachineData.CodeHash, teeInfo.MachineData.Platform, common.Hash{}, *versionF)
 	if err != nil {
 		if strings.Contains(err.Error(), "VersionAlreadyExists") {
-			logger.Infof("version already registered, skipping")
+			// A version-name collision is safe to skip only if this exact image
+			// is already supported. Otherwise swallowing the error would leave a
+			// new code hash undeployable while reporting success.
+			supported, checkErr := testSupport.TeeExtensionRegistry.IsCodeHashPlatformSupported(
+				nil,
+				teeInfo.MachineData.ExtensionID.Big(),
+				teeInfo.MachineData.CodeHash,
+				teeInfo.MachineData.Platform,
+			)
+			if checkErr != nil {
+				fccutils.FatalWithCause(checkErr)
+			}
+			if !supported {
+				fccutils.FatalWithCause(fmt.Errorf("version %s already exists but does not support code hash %s on platform %s: %w", *versionF, teeInfo.MachineData.CodeHash.Hex(), teeInfo.MachineData.Platform.Hex(), err))
+			}
+			logger.Infof("version already registered for this code hash + platform, skipping")
 		} else {
 			fccutils.FatalWithCause(err)
 		}

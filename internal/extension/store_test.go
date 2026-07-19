@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestStore_PutAndGet(t *testing.T) {
@@ -42,6 +43,24 @@ func TestStore_PutDuplicateFails(t *testing.T) {
 	got, _ := s.Get(1)
 	if got.TriggerPrice.Cmp(big.NewInt(1)) != 0 {
 		t.Errorf("duplicate put overwrote order: trigger %s", got.TriggerPrice)
+	}
+}
+
+func TestStore_RejectsInvalidPolicyShapes(t *testing.T) {
+	overflow := new(big.Int).Lsh(big.NewInt(1), 256)
+	for _, order := range []Order{
+		{ID: 0, TriggerPrice: big.NewInt(1), Status: StatusOpen},
+		{ID: 1, TriggerPrice: big.NewInt(0), Status: StatusOpen},
+		{ID: 1, TriggerPrice: overflow, Status: StatusOpen},
+		{ID: 1, TriggerPrice: big.NewInt(1), TrailBps: 500, Status: StatusOpen},
+		{ID: 1, TrailBps: 24, Status: StatusOpen},
+		{ID: 1, TrailBps: 5001, Status: StatusOpen},
+		{ID: 1, TrailBps: 500, HighWatermark: big.NewInt(1), Status: StatusOpen},
+		{ID: 1, TriggerPrice: big.NewInt(1), Status: StatusExecuted},
+	} {
+		if err := NewStore().Put(order); err == nil {
+			t.Errorf("expected invalid policy to fail: %+v", order)
+		}
 	}
 }
 
@@ -93,6 +112,96 @@ func TestStore_OpenOrdersSortedAndFiltered(t *testing.T) {
 	}
 	if open[0].ID != 1 || open[1].ID != 3 {
 		t.Errorf("expected ids [1 3], got [%d %d]", open[0].ID, open[1].ID)
+	}
+}
+
+func TestStore_TrailingStopTracksHighAndTriggersOnDrawdown(t *testing.T) {
+	s := NewStore()
+	s.ObservePrice(big.NewInt(20_000), time.Now())
+	_ = s.Put(Order{ID: 1, TrailBps: 500, Status: StatusOpen})
+	if got := s.TriggeredOrders(big.NewInt(20_000)); len(got) != 0 {
+		t.Fatalf("initial price should only seed high watermark")
+	}
+	if got := s.TriggeredOrders(big.NewInt(24_000)); len(got) != 0 {
+		t.Fatalf("new high should move the private trigger")
+	}
+	got := s.TriggeredOrders(big.NewInt(22_800))
+	if len(got) != 1 || got[0].TriggerPrice.Cmp(big.NewInt(22_800)) != 0 {
+		t.Fatalf("expected trigger at 5%% drawdown, got %+v", got)
+	}
+}
+
+func TestStore_EffectiveTriggerReturnsCurrentPrivateValueAndCopy(t *testing.T) {
+	s := NewStore()
+	s.ObservePrice(big.NewInt(20_000), time.Now())
+	if err := s.Put(Order{ID: 1, TrailBps: 500, Status: StatusOpen}); err != nil {
+		t.Fatalf("put trailing order: %v", err)
+	}
+	if got := s.TriggeredOrders(big.NewInt(24_000)); len(got) != 0 {
+		t.Fatalf("expected high-watermark update without trigger, got %d", len(got))
+	}
+
+	trigger, ok := s.EffectiveTrigger(1)
+	if !ok || trigger.Cmp(big.NewInt(22_800)) != 0 {
+		t.Fatalf("effective trigger = %v, %v; want 22800, true", trigger, ok)
+	}
+	trigger.SetInt64(1)
+	again, ok := s.EffectiveTrigger(1)
+	if !ok || again.Cmp(big.NewInt(22_800)) != 0 {
+		t.Fatalf("mutating returned trigger changed store: %v, %v", again, ok)
+	}
+}
+
+func TestStore_TrailingStopActivatesFromLatestTrustedSample(t *testing.T) {
+	s := NewStore()
+	s.ObservePrice(big.NewInt(24_000), time.Now())
+	if err := s.Put(Order{ID: 1, TrailBps: 500, Status: StatusOpen}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	got := s.TriggeredOrders(big.NewInt(22_800))
+	if len(got) != 1 || got[0].TriggerPrice.Cmp(big.NewInt(22_800)) != 0 {
+		t.Fatalf("expected activation from latest trusted sample, got %+v", got)
+	}
+}
+
+func TestStore_TrailingRequiresFreshTrustedSample(t *testing.T) {
+	s := NewStore()
+	if err := s.Put(Order{ID: 1, TrailBps: 500, Status: StatusOpen}); err == nil {
+		t.Fatal("expected trailing order before first trusted sample to fail")
+	}
+	if got := s.SupportedPolicies(); len(got) != 1 || got[0] != "fixed" {
+		t.Fatalf("expected only fixed policy before readiness, got %v", got)
+	}
+
+	s.ObservePrice(big.NewInt(24_000), time.Now().Add(-trailingSampleMaxAge-time.Second))
+	if err := s.Put(Order{ID: 1, TrailBps: 500, Status: StatusOpen}); err == nil {
+		t.Fatal("expected trailing order with stale activation sample to fail")
+	}
+
+	s.ObservePrice(big.NewInt(24_000), time.Now())
+	if err := s.Put(Order{ID: 1, TrailBps: 500, Status: StatusOpen}); err != nil {
+		t.Fatalf("expected fresh trusted sample to activate trailing: %v", err)
+	}
+	if got := s.SupportedPolicies(); len(got) != 2 || got[1] != "trailing" {
+		t.Fatalf("expected trailing capability while sample is fresh, got %v", got)
+	}
+}
+
+func TestStore_ClonesBigIntsAtBoundaries(t *testing.T) {
+	s := NewStore()
+	trigger := big.NewInt(20_000)
+	if err := s.Put(Order{ID: 1, TriggerPrice: trigger, Status: StatusOpen}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	trigger.SetInt64(1)
+	got, _ := s.Get(1)
+	if got.TriggerPrice.Cmp(big.NewInt(20_000)) != 0 {
+		t.Fatalf("caller mutated stored trigger: %s", got.TriggerPrice)
+	}
+	got.TriggerPrice.SetInt64(2)
+	again, _ := s.Get(1)
+	if again.TriggerPrice.Cmp(big.NewInt(20_000)) != 0 {
+		t.Fatalf("Get returned aliased trigger: %s", again.TriggerPrice)
 	}
 }
 

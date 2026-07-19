@@ -118,9 +118,10 @@ type OrderState struct {
 
 // State holds the extension's observable state, returned by GET /state.
 type State struct {
-	EncryptionPubKey string       `json:"encryptionPubKey"`
-	OpenOrders       int          `json:"openOrders"`
-	Orders           []OrderState `json:"orders"`
+	EncryptionPubKey  string       `json:"encryptionPubKey"`
+	SupportedPolicies []string     `json:"supportedPolicies"`
+	OpenOrders        int          `json:"openOrders"`
+	Orders            []OrderState `json:"orders"`
 }
 
 // --- DO NOT MODIFY below this line. ---

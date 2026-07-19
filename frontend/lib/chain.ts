@@ -3,6 +3,7 @@ import { defineChain } from "viem";
 // Defaults target Flare Testnet Coston2; scripts/dev-stack.sh overrides these
 // via frontend/.env.local to point at a local anvil devnet.
 const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "114");
+const orderingFlag = process.env.NEXT_PUBLIC_ORDERING_ENABLED;
 const rpcUrl =
   process.env.NEXT_PUBLIC_RPC_URL ??
   "https://coston2-api.flare.network/ext/C/rpc";
@@ -11,6 +12,13 @@ const rpcUrl =
 export const explorerBase =
   process.env.NEXT_PUBLIC_EXPLORER_URL ??
   (chainId === 114 ? "https://coston2-explorer.flare.network" : "");
+
+// Coston2 artifacts are deployed, but the live FCC relay is currently gated
+// by Flare's availability proof. Local Anvil is operable by default; any
+// hosted relay must opt in explicitly once its full path is healthy.
+export const orderingEnabled = orderingFlag !== undefined
+  ? orderingFlag === "true"
+  : chainId === 31_337;
 
 export const chain = defineChain({
   id: chainId,

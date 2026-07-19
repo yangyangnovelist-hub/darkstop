@@ -23,6 +23,21 @@ import {
   randomBytes,
 } from "@noble/hashes/utils.js";
 
+// Equal-length plaintext prevents ciphertext length from revealing whether a
+// placement contains a fixed or trailing policy. JSON is padded with spaces,
+// which Go's strict decoder accepts only after the single top-level object.
+export const POLICY_PLAINTEXT_BYTES = 128;
+
+function encodePaddedPolicy(policy: object): Uint8Array {
+  const json = new TextEncoder().encode(JSON.stringify(policy));
+  if (json.length > POLICY_PLAINTEXT_BYTES) {
+    throw new Error("encrypted policy exceeds fixed plaintext envelope");
+  }
+  const padded = new Uint8Array(POLICY_PLAINTEXT_BYTES).fill(0x20);
+  padded.set(json);
+  return padded;
+}
+
 /** NIST SP 800-56 concatenation KDF as implemented by go-ethereum:
  *  K = SHA-256(counter_1 ‖ z ‖ s1) ‖ SHA-256(counter_2 ‖ z ‖ s1) ‖ … */
 export function concatKDF(z: Uint8Array, kdLen: number): Uint8Array {
@@ -73,12 +88,28 @@ export function encryptTriggerPrice(
   if (!/^[1-9]\d*$/.test(triggerPrice6)) {
     throw new Error(`trigger price must be a positive integer string, got "${triggerPrice6}"`);
   }
+  if (BigInt(triggerPrice6) >= (1n << 256n)) {
+    throw new Error("trigger price exceeds uint256");
+  }
   const pub = hexToBytes(teePubKeyHex.replace(/^0x/, ""));
   if (pub.length !== 65 || pub[0] !== 0x04) {
     throw new Error("TEE public key must be 65-byte uncompressed (0x04-prefixed)");
   }
-  const plaintext = new TextEncoder().encode(
-    JSON.stringify({ triggerPrice: triggerPrice6 }),
-  );
+  const plaintext = encodePaddedPolicy({ strategy: "fixed", triggerPrice: triggerPrice6 });
+  return `0x${bytesToHex(eciesEncrypt(pub, plaintext))}`;
+}
+
+export function encryptTrailingStop(
+  teePubKeyHex: string,
+  trailBps: number,
+): `0x${string}` {
+  if (!Number.isInteger(trailBps) || trailBps < 25 || trailBps > 5000) {
+    throw new Error("trailing distance must be between 0.25% and 50%");
+  }
+  const pub = hexToBytes(teePubKeyHex.replace(/^0x/, ""));
+  if (pub.length !== 65 || pub[0] !== 0x04) {
+    throw new Error("TEE public key must be 65-byte uncompressed (0x04-prefixed)");
+  }
+  const plaintext = encodePaddedPolicy({ strategy: "trailing", trailBps });
   return `0x${bytesToHex(eciesEncrypt(pub, plaintext))}`;
 }

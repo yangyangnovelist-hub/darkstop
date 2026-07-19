@@ -228,6 +228,66 @@ func TestParseTriggerPlaintext(t *testing.T) {
 	}
 }
 
+func TestParseOrderPlaintext_TrailingStop(t *testing.T) {
+	policy, err := ParseOrderPlaintext([]byte(`{"strategy":"trailing","trailBps":500}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if policy.TrailBps != 500 || policy.TriggerPrice != nil {
+		t.Fatalf("unexpected policy: %+v", policy)
+	}
+	for _, payload := range []string{
+		`{"strategy":"trailing","trailBps":25}`,
+		`{"strategy":"trailing","trailBps":5000}`,
+	} {
+		if _, err := ParseOrderPlaintext([]byte(payload)); err != nil {
+			t.Fatalf("expected boundary trail to pass: %s: %v", payload, err)
+		}
+	}
+	for _, payload := range []string{
+		`{"trailBps":500}`,
+		`{"strategy":"trailing","trailBps":1}`,
+		`{"strategy":"trailing","trailBps":5001}`,
+	} {
+		if _, err := ParseOrderPlaintext([]byte(payload)); err == nil {
+			t.Fatalf("expected invalid trail to fail: %s", payload)
+		}
+	}
+}
+
+func TestParseOrderPlaintext_RejectsAmbiguousOrUnsafePayloads(t *testing.T) {
+	overflow := new(big.Int).Lsh(big.NewInt(1), 256).String()
+	cases := []string{
+		`{"strategy":"fixed","triggerPrice":"20000","trailBps":500}`,
+		`{"strategy":"trailing","triggerPrice":"20000","trailBps":500}`,
+		`{"strategy":"fixed","triggerPrice":"20000"}{"strategy":"fixed","triggerPrice":"1"}`,
+		`{"strategy":"fixed","triggerPrice":"20000","triggerPrice":"1"}`,
+		`{"Strategy":"fixed","triggerPrice":"20000"}`,
+		`{"strategy":"fixed","triggerPrice":"` + overflow + `"}`,
+	}
+	for _, payload := range cases {
+		if _, err := ParseOrderPlaintext([]byte(payload)); err == nil {
+			t.Errorf("expected payload to fail: %s", payload)
+		}
+	}
+}
+
+func TestParseOrderPlaintext_TaggedFixedAndLegacyFixed(t *testing.T) {
+	for _, payload := range []string{
+		`{"strategy":"fixed","triggerPrice":"20000"}`,
+		`{"triggerPrice":"20000"}`,
+		`{"strategy":"fixed","triggerPrice":"20000"}        `,
+	} {
+		policy, err := ParseOrderPlaintext([]byte(payload))
+		if err != nil {
+			t.Fatalf("expected fixed payload to pass: %s: %v", payload, err)
+		}
+		if policy.TriggerPrice.Cmp(big.NewInt(20_000)) != 0 || policy.TrailBps != 0 {
+			t.Fatalf("unexpected policy for %s: %+v", payload, policy)
+		}
+	}
+}
+
 func bigFromString(t *testing.T, s string) *big.Int {
 	t.Helper()
 	v, ok := new(big.Int).SetString(s, 10)

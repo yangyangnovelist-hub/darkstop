@@ -11,6 +11,12 @@
   color-scheme: dark;
 }
 
+@font-face {
+  font-family: "DarkStop Display";
+  src: local("Avenir Next Condensed"), local("Arial Narrow");
+  font-display: swap;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -19,7 +25,21 @@
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(circle at 76% -10%, rgba(52, 211, 153, 0.10), transparent 32rem),
+    #09090b;
   color: var(--foreground);
   font-family: var(--font-system-sans);
 }
+
+.font-display { font-family: "DarkStop Display", sans-serif; }
+.hero-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .22;
+  background-image: linear-gradient(rgba(52,211,153,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(52,211,153,.12) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: linear-gradient(to right, transparent, black 55%, transparent);
+}
+.proof-card { backdrop-filter: blur(12px); }
