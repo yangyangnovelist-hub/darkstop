@@ -23,6 +23,13 @@ FTSO FLR/USD feed and requires a fresh price at-or-below the revealed trigger
 before paying out. The authorized TEE remains responsible for enforcing the
 encrypted policy itself.
 
+**A different use of the TEE.** Confidential-compute work on Flare has mostly put
+the enclave around AI inference or user onboarding. DarkStop uses it for
+transaction privacy instead: sealing a moving trigger so it cannot be hunted. And
+it does not let the enclave be the final authority over payout. The on-chain FTSO
+re-check in `settle()` is what makes the TEE's price observation verifiable rather
+than merely trusted.
+
 ## Architecture
 
 ```mermaid
@@ -201,6 +208,11 @@ The fork suite self-skips when not on a Coston2 fork, so plain `forge test`
 is always safe. The fork tests place and settle an order against the live
 FLR/USD feed — the strongest evidence available that the deployed vault's
 FTSO re-check works on the real network.
+
+Beyond the suites above, a live watcher run settled a real order on Coston2
+through a dev-stack deployment (mock TEE registries, real chain, real settlement
+tx [`0xb0d158…d2cb`](https://coston2-explorer.flare.network/tx/0xb0d158681c53564f4265218d941d0ea2be99c576e4977aade1f4b5a2ffced2cb)).
+Full account in [`docs/watcher-live-validation.md`](docs/watcher-live-validation.md).
 
 ## Roadmap
 
