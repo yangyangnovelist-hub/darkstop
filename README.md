@@ -4,6 +4,9 @@ Private trailing stops whose moving triggers stay sealed until execution. Built 
 Flare Summer Signal hackathon (DoraHacks), Bounty 2 — Confidential Compute
 Apps.
 
+**Submission status:** prepared for Flare Summer Signal with reproducible local
+FCC execution, Coston2 deployment evidence, and live-FTSO fork verification.
+
 ## The problem
 
 On-chain stop-loss orders leak the one thing they must protect: the trigger
@@ -213,6 +216,10 @@ Beyond the suites above, a live watcher run settled a real order on Coston2
 through a dev-stack deployment (mock TEE registries, real chain, real settlement
 tx [`0xb0d158…d2cb`](https://coston2-explorer.flare.network/tx/0xb0d158681c53564f4265218d941d0ea2be99c576e4977aade1f4b5a2ffced2cb)).
 Full account in [`docs/watcher-live-validation.md`](docs/watcher-live-validation.md).
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
 
 ## Roadmap
 
