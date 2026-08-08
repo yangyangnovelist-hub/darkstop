@@ -7,6 +7,8 @@ Apps.
 **Submission status:** prepared for Flare Summer Signal with reproducible local
 FCC execution, Coston2 deployment evidence, and live-FTSO fork verification.
 
+**Demo:** [DarkStop — Confidential Stop-Loss on Flare](https://youtu.be/7k1rbxJTpnY)
+
 ## The problem
 
 On-chain stop-loss orders leak the one thing they must protect: the trigger

@@ -26,6 +26,7 @@ tools/pkg/contracts/*/*.bin
 
 
 notes/
+submission-assets/
 
 # Private deployment guide (SSH, redeploy instructions)
 DEPLOYMENT.md
