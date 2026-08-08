@@ -94,6 +94,12 @@ nohup env \
   "$EXTENSION_BIN" >"$EXTENSION_LOG" 2>&1 &
 echo $! >"$EXTENSION_PIDFILE"
 
+# Anvil may be reused across demo runs, so the mock feed timestamp from the
+# deployment block can already be outside the trailing-policy freshness gate by
+# the time the Go binary is built. Refresh it before the readiness check.
+cast send "$FTSO" 'setFeed(uint256,int8,uint64)' 300000 7 "$(date +%s)" \
+  --rpc-url "$RPC_URL" --private-key "$DEV_KEY" >/dev/null
+
 for _ in $(seq 1 50); do
   state_json="$(curl -fsS http://127.0.0.1:7702/state 2>/dev/null || true)"
   state_key="$(jq -r '.state.encryptionPubKey // empty' <<<"$state_json" 2>/dev/null || true)"
