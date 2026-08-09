@@ -9,6 +9,10 @@ FCC execution, Coston2 deployment evidence, and live-FTSO fork verification.
 
 **Demo:** [DarkStop — Confidential Stop-Loss on Flare](https://youtu.be/7k1rbxJTpnY)
 
+**Live product:** [darkstop.xpartara.workers.dev](https://darkstop.xpartara.workers.dev) —
+the public build targets Coston2, exposes the deployed vault and evidence, and keeps new
+ordering disabled while Flare's confirmed FCC availability-proof rebuild is unresolved.
+
 ## The problem
 
 On-chain stop-loss orders leak the one thing they must protect: the trigger

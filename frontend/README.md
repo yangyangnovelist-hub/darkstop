@@ -6,6 +6,8 @@ in the browser** (go-ethereum `crypto/ecies` wire format — see `lib/ecies.ts`)
 and watch order status flip live from `OrderPlaced` / `OrderExecuted` /
 `OrderCancelled` events.
 
+Hosted Coston2 build: https://darkstop.xpartara.workers.dev
+
 ## Configuration (env)
 
 Defaults target Flare Testnet Coston2 (vault `0xd93E8F7dE2A5A7C4eC45F115f7047103da2dD8bF`,
@@ -21,6 +23,16 @@ see `../docs/deployments.md`). Override via `.env.local`:
 | `NEXT_PUBLIC_START_BLOCK` | probe from genesis, fall back to recent | `getLogs` start for order history |
 | `TEE_STATE_URL` | `http://localhost:7702/state` | TEE extension `/state` (proxied server-side by `/api/tee-state`) |
 | `DEV_FALLBACK_TEE_PUBKEY` | unset | Local-dev-only pubkey used when the TEE is unreachable |
+
+## Deploy
+
+The frontend uses the official OpenNext Cloudflare adapter. The production script explicitly
+overrides the local dev-stack `.env.local` values, targets Coston2, and keeps ordering disabled
+until the full FCC relay is healthy:
+
+```bash
+npm run deploy
+```
 
 ## Local development stack (simulated enclave, real extension code)
 

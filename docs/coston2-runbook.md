@@ -117,3 +117,12 @@ and could change before the final release on Flare mainnet." (t.me/c/2376654368/
 FCC on Coston2, NOT our code. Action: stop attempting TEE-machine registration until Flare
 ships the update; our extension + proxy are correct and were validated end-to-end up to the
 Flare-controlled step. Cite this quote in the README as evidence the on-chain gap is external.
+
+## Recheck — 2026-08-09
+
+The current official FCC guide still documents the same `post-build.sh` registration flow and
+the same `NORMAL_PROXY_URL=https://tee-proxy-coston2-1.flare.rocks`; it does not publish a
+replacement availability-proof endpoint. A fresh read-only request for instruction
+`0xd6aefde26c1ac2fedb62b78119e31b615c93477a4bb976943c442d63add73c33` still returns HTTP 404.
+No additional registration transaction was sent: the blocker remains the previously confirmed
+Flare-side Coston2 rebuild, and repeating the on-chain request would only waste testnet gas.
