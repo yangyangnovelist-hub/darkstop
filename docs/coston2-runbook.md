@@ -126,3 +126,22 @@ replacement availability-proof endpoint. A fresh read-only request for instructi
 `0xd6aefde26c1ac2fedb62b78119e31b615c93477a4bb976943c442d63add73c33` still returns HTTP 404.
 No additional registration transaction was sent: the blocker remains the previously confirmed
 Flare-side Coston2 rebuild, and repeating the on-chain request would only waste testnet gas.
+
+## Recheck — 2026-08-31
+
+The same availability instruction still returns HTTP 404 from the official Coston2 proxy. The
+network itself is healthy at chain id `114`; the read-only check observed block `34711640`. No
+registration or `placeOrder` transaction was sent because the missing proof has not changed and a
+duplicate request would add no evidence.
+
+The compensating live-infrastructure verification remains healthy. All four fork tests passed at
+fork block `34711639`, including a positive place-and-settle path against the live FLR/USD feed plus
+stale-feed and above-trigger rejection paths:
+
+```text
+4 passed; 0 failed; 0 skipped
+```
+
+The public frontend also returned HTTP 200 and continues to keep Coston2 ordering disabled. This
+preserves the accurate boundary: working local simulated-FCC loop, real Coston2 contracts and FTSO
+verification, but no claim of a production-set FCC order while Flare's proof endpoint is absent.

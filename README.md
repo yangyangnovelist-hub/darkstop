@@ -165,8 +165,9 @@ Stated plainly, because judges should not have to dig for this:
   (Flare's FTDC proxy pulls its `TEE_INFO` every ~10s), but the FTDC proxy has
   not produced the availability-check attestation for our instruction, so
   `getRandomTeeIds` reverts and `placeOrder` cannot complete on the live
-  testnet. This is documented, escalated to the Flare team, and outside our
-  code. The end-to-end flow is therefore demonstrated two ways: the full
+  testnet. A read-only recheck on **2026-08-31** still returned HTTP 404; no
+  duplicate registration transaction was sent. This is documented, escalated
+  to the Flare team, and outside our code. The end-to-end flow is therefore demonstrated two ways: the full
   place → trigger → settle loop on a local dev stack, and the settlement path
   against the *real* Coston2 FTSO via fork tests
   ([`docs/coston2-runbook.md`](docs/coston2-runbook.md) has the full account).
@@ -216,7 +217,8 @@ the same state transition in the UI, start `cd frontend && npm run dev` after
 The fork suite self-skips when not on a Coston2 fork, so plain `forge test`
 is always safe. The fork tests place and settle an order against the live
 FLR/USD feed — the strongest evidence available that the deployed vault's
-FTSO re-check works on the real network.
+FTSO re-check works on the real network. All four passed again at Coston2 fork
+block `34711639` on 2026-08-31.
 
 Beyond the suites above, a live watcher run settled a real order on Coston2
 through a dev-stack deployment (mock TEE registries, real chain, real settlement
